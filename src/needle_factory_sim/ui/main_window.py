@@ -9,7 +9,7 @@ from __future__ import annotations
 import json
 import uuid
 
-from PySide6.QtCore import Qt, QThread, Signal
+from PySide6.QtCore import QSettings, Qt, QThread, QTimer, Signal
 from PySide6.QtWidgets import (
     QComboBox,
     QHBoxLayout,
@@ -34,6 +34,7 @@ from ..simulation import SimulationClock
 from .ai_monitor import AIMonitor
 from .cloud_settings import CloudSettings, CloudSettingsDialog
 from .factory_view import FactoryView
+from .tutorial import TutorialOverlay, TutorialStep
 
 MODE_AUTO = "AUTO"
 MODE_FORCE_LOCAL = "FORCE LOCAL"
@@ -71,6 +72,12 @@ class MainWindow(QMainWindow):
         self.clock.start()
         self._refresh_view()
 
+        # First-launch tutorial: auto-show once, afterwards only via the button.
+        self._tutorial: TutorialOverlay | None = None
+        self._settings = QSettings("sinbumu", "NeedleFactorySim")
+        if not self._settings.value("tutorial_seen", False, bool):
+            QTimer.singleShot(600, self._show_tutorial)
+
     # ------------------------------------------------------------------ UI
 
     def _build_ui(self) -> None:
@@ -93,6 +100,10 @@ class MainWindow(QMainWindow):
         self.mode_combo.addItems([MODE_AUTO, MODE_FORCE_LOCAL, MODE_FORCE_CLOUD])
         top.addWidget(QLabel("Routing:"))
         top.addWidget(self.mode_combo)
+        self.tutorial_btn = QPushButton("❓ Tutorial")
+        self.tutorial_btn.setToolTip("Show the guided tour of the app")
+        self.tutorial_btn.clicked.connect(self._show_tutorial)
+        top.addWidget(self.tutorial_btn)
         self.cloud_btn = QPushButton("Cloud Settings")
         self.cloud_btn.clicked.connect(self._open_cloud_settings)
         top.addWidget(self.cloud_btn)
@@ -128,13 +139,17 @@ class MainWindow(QMainWindow):
         self.input_edit.returnPressed.connect(self._on_execute)
         bottom.addWidget(self.input_edit, stretch=1)
         self.demo_buttons: list[QPushButton] = []
+        self.demo_group = QWidget()
+        demo_layout = QHBoxLayout(self.demo_group)
+        demo_layout.setContentsMargins(0, 0, 0, 0)
         demo_captions = {"A": "Demo A · Local", "B": "Demo B · Safety", "C": "Demo C · Cloud"}
         for demo_key in ("A", "B", "C"):
             btn = QPushButton(demo_captions[demo_key])
             btn.setToolTip(f"Reset + prefill:\n{DEMO_PROMPTS[demo_key]}")
             btn.clicked.connect(lambda _=False, k=demo_key: self._on_demo(k))
             self.demo_buttons.append(btn)
-            bottom.addWidget(btn)
+            demo_layout.addWidget(btn)
+        bottom.addWidget(self.demo_group)
         self.execute_btn = QPushButton("Execute ▶")
         self.execute_btn.setObjectName("executeButton")
         self.execute_btn.setDefault(True)
@@ -400,6 +415,95 @@ class MainWindow(QMainWindow):
     def _on_reset(self) -> None:
         self._do_reset()
         self.monitor.append_log("[reset] simulation reset to initial state")
+
+    # -------------------------------------------------------------- tutorial
+
+    def _tutorial_steps(self) -> list[TutorialStep]:
+        return [
+            TutorialStep(
+                self.factory_view,
+                "🏭 Factory map",
+                "Five sectors (S start → E goal). Card color shows the live "
+                "temperature: blue = too cold, green = safe, red = too hot. "
+                "The yellow border marks where the robot and its cargo are. "
+                "Cargo takes damage outside 20–40°C; the bar below shows its HP.",
+            ),
+            TutorialStep(
+                self.input_edit,
+                "⌨ Command input",
+                "Type a natural-language command in English, e.g. "
+                "\"Warm up sector A to 30 degrees\" or \"Open the door of sector B\". "
+                "A tiny on-device AI (Needle 2) turns it into a tool call.",
+            ),
+            TutorialStep(
+                self.demo_group,
+                "🎬 Demo presets",
+                "Demo A: local edge control. Demo B: the AI's valid call gets "
+                "rejected by the safety controller. Demo C: a goal-oriented "
+                "request that escalates to the Cloud planner. Each preset resets "
+                "the factory and fills the input — press Execute to run it.",
+            ),
+            TutorialStep(
+                self.execute_btn,
+                "▶ Execute",
+                "Runs the command. While the AI thinks or a plan executes, new "
+                "commands are blocked (Emergency Stop and Reset always work).",
+            ),
+            TutorialStep(
+                self.mode_combo,
+                "🔀 Routing mode",
+                "AUTO: Needle answers first; if its confidence is below the "
+                "threshold (default 0.75) the request escalates to the Cloud "
+                "planner. FORCE LOCAL / FORCE CLOUD override this for testing.",
+            ),
+            TutorialStep(
+                self.cloud_btn,
+                "☁ Cloud Settings",
+                "Enter your OpenAI API key and model ID to enable Cloud "
+                "planning (Demo C). The key lives only in memory for this "
+                "session — it is never saved anywhere.",
+            ),
+            TutorialStep(
+                self.monitor,
+                "📊 AI Monitor",
+                "Shows exactly what the AI did: the routing decision, Needle's "
+                "confidence and telemetry (TPS / RAM / latency), the Cloud plan "
+                "and its per-step execution status.",
+            ),
+            TutorialStep(
+                self.monitor.controller_group,
+                "🛡 Safety controller verdict",
+                "Every AI action is validated against the physical rules "
+                "(adjacency, safe temperature, doors, contamination). Rejected "
+                "actions change nothing — the event log below keeps the history.",
+            ),
+            TutorialStep(
+                self.estop_btn,
+                "⛔ Emergency Stop",
+                "Instantly halts the simulation, cancels any running plan and "
+                "invalidates in-flight AI requests. Resume only via Reset.",
+            ),
+            TutorialStep(
+                self.reset_btn,
+                "🔄 Reset Simulation",
+                "Restores the initial factory state (robot at S, HP 100, all "
+                "temperatures reset). Your Cloud settings are kept. "
+                "Reopen this tour anytime with the ❓ Tutorial button.",
+            ),
+        ]
+
+    def _show_tutorial(self) -> None:
+        if self._tutorial is not None and self._tutorial.isVisible():
+            return
+        self._tutorial = TutorialOverlay(self, self._tutorial_steps())
+        self._tutorial.finished.connect(self._on_tutorial_finished)
+        self._tutorial.start()
+
+    def _on_tutorial_finished(self) -> None:
+        self._settings.setValue("tutorial_seen", True)
+        if self._tutorial is not None:
+            self._tutorial.deleteLater()
+            self._tutorial = None
 
     # ------------------------------------------------------------------ cloud
 

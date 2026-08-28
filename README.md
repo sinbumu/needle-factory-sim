@@ -57,6 +57,11 @@ the same thing as a valid physical action* — Demo B shows this on screen.
 
 Dark-themed single-window dashboard (PySide6, no image assets):
 
+- **First-launch tutorial**: a guided coach-mark tour walks through every
+  control (map, command input, demos, routing, cloud settings, monitor,
+  e-stop, reset). It appears automatically only on the very first launch and
+  can be reopened anytime with the **❓ Tutorial** button in the top bar.
+
 - **Left**: the 2×3 factory map as temperature-gradient sector cards (blue =
   cold, green = safe, red = hot) with kind icons, door/contamination badges and
   a yellow highlight on the robot's sector; below it the cargo HP bar (colored

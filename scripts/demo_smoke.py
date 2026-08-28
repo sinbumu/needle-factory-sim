@@ -31,6 +31,10 @@ def pump_until(app: QApplication, condition, timeout_s: float, what: str) -> Non
 def main() -> int:
     app = QApplication(sys.argv)
     apply_theme(app)
+    # Keep the first-launch tutorial out of the automated run/screenshot.
+    from PySide6.QtCore import QSettings
+
+    QSettings("sinbumu", "NeedleFactorySim").setValue("tutorial_seen", True)
     window = MainWindow()
     window.show()
 

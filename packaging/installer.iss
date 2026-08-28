@@ -3,7 +3,7 @@
 ; then compile this script with ISCC.exe.
 
 #define MyAppName "Needle Factory Sim"
-#define MyAppVersion "0.1.2"
+#define MyAppVersion "0.1.3"
 #define MyAppPublisher "sinbumu"
 #define MyAppURL "https://github.com/sinbumu/needle-factory-sim"
 #define MyAppExeName "NeedleFactorySim.exe"
@@ -18,9 +18,9 @@ AppPublisherURL={#MyAppURL}
 AppSupportURL={#MyAppURL}
 DefaultDirName={autopf}\{#MyAppName}
 DisableProgramGroupPage=yes
-; Per-user install: no admin prompt, suits an unsigned toy project.
+; Always per-user: no admin prompt, no privileges dialog (a leftover
+; administrative install record otherwise aborts silent installs).
 PrivilegesRequired=lowest
-PrivilegesRequiredOverridesAllowed=dialog
 OutputDir=..\dist
 OutputBaseFilename=NeedleFactorySim-Setup-{#MyAppVersion}
 Compression=lzma2
