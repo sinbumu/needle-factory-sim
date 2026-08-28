@@ -1,0 +1,22 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+dist/
+build/
+.venv/
+.pytest_cache/
+
+# Needle engine artifacts (never commit engine binaries)
+*.cact
+.needle/
+needle_engine/
+
+# Editors / OS
+.idea/
+.vscode/
+Thumbs.db
+
+# Secrets must never exist as files, but guard anyway
+.env
+*.key

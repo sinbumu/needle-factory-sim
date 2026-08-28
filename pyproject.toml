@@ -1,0 +1,27 @@
+[project]
+name = "needle-factory-sim"
+version = "0.1.0"
+description = "Edge AI PoC: Needle 2 local SLM tool-calling + Cloud LLM planning, validated by a deterministic FactoryController"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+    "cactus-needle",
+    "PySide6",
+    "pydantic>=2.7",
+    "openai>=1.40",
+]
+
+[dependency-groups]
+dev = [
+    "pytest>=8",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/needle_factory_sim"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
