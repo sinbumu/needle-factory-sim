@@ -158,7 +158,11 @@ contamination/reset, damage, game-over, e-stop), the confidence router (mocked
 Needle responses), strict ExecutionPlan validation (step/wait limits, order
 contiguity, extra-field rejection) and simulation reset. No test needs network
 or a real cloud key. `scripts/needle_spike.py` measures real Needle behaviour;
-`scripts/demo_smoke.py` drives Demo A/B/C end-to-end through the real window.
+`scripts/demo_smoke.py` drives Demo A/B/C end-to-end through the real window;
+`scripts/paraphrase_spike.py` measures robustness to paraphrased English
+commands (currently 20/25 execute locally; the tool docstrings carry synonym
+hints, and every miss escalates safely to CLOUD instead of executing a wrong
+action).
 
 ## Known limitations
 

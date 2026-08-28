@@ -20,13 +20,13 @@ from ..constants import TEMP_SETPOINT_MAX_C, TEMP_SETPOINT_MIN_C
 
 @needle.tool
 def move_robot(target_sector: Literal["S", "A", "B", "C", "E"]):
-    """Move the transport robot to exactly one explicitly named adjacent sector.
+    """Move, go, head, drive, or send the transport robot to exactly one explicitly named adjacent sector.
 
     This tool does not plan a route.
-    The user must explicitly identify the target sector.
+    The user must explicitly identify the single target sector by name.
 
     Args:
-        target_sector: the explicitly named destination sector
+        target_sector: the explicitly named destination sector to move, go, or drive to
     """
     return {"target_sector": target_sector}
 
@@ -43,14 +43,14 @@ def set_temperature(
         ),
     ],
 ):
-    """Set the target temperature of one explicitly named factory sector.
+    """Set, change, adjust, warm up, or cool down the target temperature of one explicitly named factory sector.
 
-    The user must explicitly provide both the sector and target temperature.
+    The user must explicitly provide both the sector and the target temperature value.
     This starts a gradual temperature transition and does not wait.
 
     Args:
-        sector_id: the explicitly named sector
-        target_c: target temperature in Celsius
+        sector_id: the explicitly named sector whose temperature is set, changed, or adjusted
+        target_c: the explicitly given target temperature in degrees Celsius
     """
     return {"sector_id": sector_id, "target_c": target_c}
 
@@ -59,30 +59,34 @@ def set_temperature(
 def toggle_door(sector_id: Literal["B"], open: bool):  # noqa: A002
     """Open or close the entry door for sector B.
 
-    The user must explicitly request the door state.
+    The user must explicitly request the desired door state.
+    "open the door" means open=true. "close the door" or "shut the door" means open=false.
 
     Args:
         sector_id: the door sector (only B has a door)
-        open: true to open the door, false to close it
+        open: the desired door state. open the door = true. close or shut the door = false
     """
     return {"sector_id": sector_id, "open": open}
 
 
 @needle.tool
 def reset_sector(sector_id: Literal["C"]):
-    """Reset the contamination state of sector C after the robot has left it.
+    """Reset, clean, clean up, decontaminate, or clear the contamination of sector C after the robot has left it.
 
-    Use only when the user explicitly requests a sector reset.
+    Use only when the user explicitly asks for the sector to be reset, cleaned, or decontaminated.
 
     Args:
-        sector_id: the contaminated sector (only C is resettable)
+        sector_id: the contaminated sector to reset or clean (only C is resettable)
     """
     return {"sector_id": sector_id}
 
 
 @needle.tool
 def emergency_stop():
-    """Immediately stop the factory simulation when the user explicitly requests an emergency stop."""
+    """Emergency stop: immediately stop everything, halt all operations, or abort the entire factory.
+
+    Use when the user urgently asks to stop everything, stop now, halt, or abort.
+    """
     return {}
 
 

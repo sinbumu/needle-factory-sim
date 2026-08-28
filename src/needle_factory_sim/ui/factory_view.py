@@ -199,7 +199,6 @@ class FactoryView(QWidget):
         self._status_label = QLabel()
         self._status_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         root.addWidget(self._status_label)
-        root.addStretch(1)
 
     def update_from(self, state: FactoryState) -> None:
         for card in self._cards.values():

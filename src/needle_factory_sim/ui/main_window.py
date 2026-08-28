@@ -105,11 +105,18 @@ class MainWindow(QMainWindow):
         top.addWidget(self.estop_btn)
         root.addLayout(top)
 
-        # Center: factory view | monitor
+        # Center: (factory view + controller result + log) | monitor
         splitter = QSplitter(Qt.Orientation.Horizontal)
         self.factory_view = FactoryView()
         self.monitor = AIMonitor()
-        splitter.addWidget(self.factory_view)
+        left = QWidget()
+        left_layout = QVBoxLayout(left)
+        left_layout.setContentsMargins(0, 0, 0, 0)
+        left_layout.setSpacing(10)
+        left_layout.addWidget(self.factory_view)
+        left_layout.addWidget(self.monitor.controller_group)
+        left_layout.addWidget(self.monitor.log, stretch=1)
+        splitter.addWidget(left)
         splitter.addWidget(self.monitor)
         splitter.setSizes([640, 520])
         root.addWidget(splitter, stretch=1)

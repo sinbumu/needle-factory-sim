@@ -136,18 +136,19 @@ class AIMonitor(QWidget):
         self.steps_table.setMinimumHeight(160)
         layout.addWidget(self.steps_table)
 
+        layout.addStretch(1)
+
+        # Shown on the LEFT column (under the mission status pill) — created
+        # here so all monitor update methods stay in one place, but parented
+        # into the main window's left layout.
         self.controller_group = _FieldGroup(
             "Controller (deterministic)",
             [("result", "Result"), ("message", "Message")],
         )
-        layout.addWidget(self.controller_group)
-
         self.log = QPlainTextEdit()
         self.log.setReadOnly(True)
         self.log.setMaximumBlockCount(500)
         self.log.setMinimumHeight(120)
-        layout.addWidget(self.log)
-        layout.addStretch(1)
 
     # ------------------------------------------------------------------ API
 
