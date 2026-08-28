@@ -8,10 +8,12 @@ from PySide6.QtCore import QTimer
 from PySide6.QtWidgets import QApplication
 
 from .ui.main_window import MainWindow
+from .ui.theme import apply_theme
 
 
 def main() -> int:
     app = QApplication(sys.argv)
+    apply_theme(app)
     window = MainWindow()
     window.show()
 

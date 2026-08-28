@@ -15,6 +15,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 from PySide6.QtWidgets import QApplication
 
 from needle_factory_sim.ui.main_window import MainWindow
+from needle_factory_sim.ui.theme import apply_theme
 
 
 def pump_until(app: QApplication, condition, timeout_s: float, what: str) -> None:
@@ -29,6 +30,7 @@ def pump_until(app: QApplication, condition, timeout_s: float, what: str) -> Non
 
 def main() -> int:
     app = QApplication(sys.argv)
+    apply_theme(app)
     window = MainWindow()
     window.show()
 

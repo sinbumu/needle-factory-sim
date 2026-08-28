@@ -18,9 +18,23 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from PySide6.QtGui import QBrush, QColor, QFont
+
 from ..ai.needle_adapter import NeedleResult
 
 NA = "N/A"
+
+CAPTION_COLOR = "#9aa3b2"
+
+STEP_STATUS_COLORS = {
+    "PENDING": "#9aa3b2",
+    "RUNNING": "#4f8cff",
+    "WAITING": "#c99b2e",
+    "SUCCEEDED": "#2fa066",
+    "FAILED": "#c94040",
+    "CANCELLED": "#b35a1f",
+    "SKIPPED": "#6a7180",
+}
 
 
 def _fmt(value: Any, suffix: str = "") -> str:
@@ -42,7 +56,9 @@ class _FieldGroup(QGroupBox):
             label.setWordWrap(True)
             label.setTextInteractionFlags(label.textInteractionFlags() | label.textInteractionFlags().TextSelectableByMouse)
             self.labels[key] = label
-            form.addRow(caption, label)
+            cap = QLabel(caption)
+            cap.setStyleSheet(f"color: {CAPTION_COLOR};")
+            form.addRow(cap, label)
 
     def set(self, key: str, value: str) -> None:
         self.labels[key].setText(value if value else NA)
@@ -174,8 +190,15 @@ class AIMonitor(QWidget):
         g.set("error", _fmt(result.error))
 
     def set_route(self, route: str, reason: str, override: bool) -> None:
-        self.route_group.set("route", route)
-        self.route_group.set("override", "TRUE" if override else "false")
+        route_label = self.route_group.labels["route"]
+        route_label.setText(route)
+        color = "#2fa066" if route.startswith("LOCAL") else "#4f8cff"
+        route_label.setStyleSheet(f"color: {color}; font-weight: bold;")
+        override_label = self.route_group.labels["override"]
+        override_label.setText("TRUE" if override else "false")
+        override_label.setStyleSheet(
+            "color: #c99b2e; font-weight: bold;" if override else ""
+        )
         self.route_group.set("reason", reason)
 
     def set_cloud_configured(self, configured: bool, model_id: str) -> None:
@@ -191,13 +214,25 @@ class AIMonitor(QWidget):
             self.steps_table.setItem(row, 0, QTableWidgetItem(str(row + 1)))
             self.steps_table.setItem(row, 1, QTableWidgetItem(action))
             self.steps_table.setItem(row, 2, QTableWidgetItem(args))
-            self.steps_table.setItem(row, 3, QTableWidgetItem("PENDING"))
+            self.steps_table.setItem(row, 3, self._status_item("PENDING"))
+
+    def _status_item(self, status: str) -> QTableWidgetItem:
+        item = QTableWidgetItem(status)
+        item.setForeground(QBrush(QColor(STEP_STATUS_COLORS.get(status, "#e8eaf0"))))
+        font = QFont()
+        font.setBold(True)
+        item.setFont(font)
+        return item
 
     def set_step_status(self, index: int, status: str) -> None:
         if 0 <= index < self.steps_table.rowCount():
-            self.steps_table.setItem(index, 3, QTableWidgetItem(status))
+            self.steps_table.setItem(index, 3, self._status_item(status))
 
     def show_controller_result(self, accepted: bool, message: str, error_code: str | None) -> None:
-        verdict = "ACCEPTED" if accepted else f"REJECTED ({error_code or 'ERROR'})"
-        self.controller_group.set("result", verdict)
+        verdict = "✅ ACCEPTED" if accepted else f"⛔ REJECTED ({error_code or 'ERROR'})"
+        label = self.controller_group.labels["result"]
+        label.setText(verdict)
+        label.setStyleSheet(
+            f"color: {'#2fa066' if accepted else '#c94040'}; font-weight: bold;"
+        )
         self.controller_group.set("message", message + ("" if accepted else "\nState changed: false"))

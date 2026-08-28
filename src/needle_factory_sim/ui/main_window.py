@@ -77,13 +77,16 @@ class MainWindow(QMainWindow):
         central = QWidget()
         self.setCentralWidget(central)
         root = QVBoxLayout(central)
+        root.setContentsMargins(12, 10, 12, 10)
+        root.setSpacing(10)
 
         # Top bar
         top = QHBoxLayout()
         title = QLabel("Needle Factory Sim")
         title.setStyleSheet("font-weight: bold; font-size: 16px;")
         top.addWidget(title)
-        self.engine_label = QLabel("Needle: INITIALIZING...")
+        self.engine_label = QLabel("● Needle: INITIALIZING…")
+        self.engine_label.setStyleSheet("color: #c99b2e; font-weight: bold;")
         top.addWidget(self.engine_label)
         top.addStretch(1)
         self.mode_combo = QComboBox()
@@ -96,10 +99,8 @@ class MainWindow(QMainWindow):
         self.reset_btn = QPushButton("Reset Simulation")
         self.reset_btn.clicked.connect(self._on_reset)
         top.addWidget(self.reset_btn)
-        self.estop_btn = QPushButton("EMERGENCY STOP")
-        self.estop_btn.setStyleSheet(
-            "background-color: #b02a2a; color: white; font-weight: bold; padding: 6px 12px;"
-        )
+        self.estop_btn = QPushButton("⛔ EMERGENCY STOP")
+        self.estop_btn.setObjectName("estopButton")
         self.estop_btn.clicked.connect(self._on_emergency_stop)
         top.addWidget(self.estop_btn)
         root.addLayout(top)
@@ -120,12 +121,15 @@ class MainWindow(QMainWindow):
         self.input_edit.returnPressed.connect(self._on_execute)
         bottom.addWidget(self.input_edit, stretch=1)
         self.demo_buttons: list[QPushButton] = []
+        demo_captions = {"A": "Demo A · Local", "B": "Demo B · Safety", "C": "Demo C · Cloud"}
         for demo_key in ("A", "B", "C"):
-            btn = QPushButton(f"Demo {demo_key}")
+            btn = QPushButton(demo_captions[demo_key])
+            btn.setToolTip(f"Reset + prefill:\n{DEMO_PROMPTS[demo_key]}")
             btn.clicked.connect(lambda _=False, k=demo_key: self._on_demo(k))
             self.demo_buttons.append(btn)
             bottom.addWidget(btn)
-        self.execute_btn = QPushButton("Execute")
+        self.execute_btn = QPushButton("Execute ▶")
+        self.execute_btn.setObjectName("executeButton")
         self.execute_btn.setDefault(True)
         self.execute_btn.clicked.connect(self._on_execute)
         bottom.addWidget(self.execute_btn)
@@ -157,6 +161,12 @@ class MainWindow(QMainWindow):
     def _set_busy(self, phase: str | None) -> None:
         self.busy = phase
         enabled = phase is None
+        busy_texts = {
+            "LOCAL_INFERENCE": "Needle thinking…",
+            "CLOUD_PLANNING": "Cloud planning…",
+            "PLAN_EXECUTING": "Executing plan…",
+        }
+        self.execute_btn.setText(busy_texts.get(phase, "Execute ▶"))
         self.input_edit.setEnabled(enabled)
         self.execute_btn.setEnabled(enabled)
         for btn in self.demo_buttons:
@@ -176,18 +186,20 @@ class MainWindow(QMainWindow):
         self._refresh_view()
 
     def _on_engine_state(self, state: str) -> None:
-        pretty = {
-            "INITIALIZING": "Needle: INITIALIZING...",
-            "READY": "Needle: READY (local inference available)",
-            "ERROR": "Needle: ERROR",
-        }.get(state, f"Needle: {state}")
+        pretty, color = {
+            "INITIALIZING": ("● Needle: INITIALIZING…", "#c99b2e"),
+            "READY": ("● Needle: READY (local inference available)", "#2fa066"),
+            "ERROR": ("● Needle: ERROR", "#c94040"),
+        }.get(state, (f"● Needle: {state}", "#9aa3b2"))
         self.engine_label.setText(pretty)
+        self.engine_label.setStyleSheet(f"color: {color}; font-weight: bold;")
         self.monitor.set_engine_state(state)
 
     def _on_demo(self, key: str) -> None:
         # Preset = reset to the identical initial state + prefill the prompt.
         self._do_reset()
         self.input_edit.setText(DEMO_PROMPTS[key])
+        self.input_edit.setFocus()
         self.monitor.append_log(f"[demo] preset {key} loaded — press Execute")
 
     def _on_execute(self) -> None:
