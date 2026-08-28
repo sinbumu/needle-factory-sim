@@ -53,6 +53,21 @@ temperature safety, door state, contamination rules, mission status. A rejected
 action changes nothing (`state_changed = false`). *A valid AI tool call is not
 the same thing as a valid physical action* — Demo B shows this on screen.
 
+## UI
+
+Dark-themed single-window dashboard (PySide6, no image assets):
+
+- **Left**: the 2×3 factory map as temperature-gradient sector cards (blue =
+  cold, green = safe, red = hot) with kind icons, door/contamination badges and
+  a yellow highlight on the robot's sector; below it the cargo HP bar (colored
+  by health), the mission status pill, the **deterministic controller verdict**
+  (✅ ACCEPTED / ⛔ REJECTED + reason) and the event log — all visible without
+  scrolling.
+- **Right**: the AI monitor — routing decision (mode / route / override /
+  reason / threshold), Needle telemetry (confidence, function call, reasoning,
+  TPS, RAM, latency), cloud planner status and the plan step table with live
+  per-step statuses.
+
 ## Requirements
 
 - Windows 11 x64 (primary target; the code is plain PySide6/Python)
@@ -124,12 +139,12 @@ All three start from the identical initial state.
 
 ### Demo A — Local edge control
 `Set sector A temperature to 30 degrees.` → Needle returns exactly one
-`set_temperature(A, 30)` call at confidence **0.84** → routed LOCAL → controller
+`set_temperature(A, 30)` call at confidence **~0.81** → routed LOCAL → controller
 accepts → A's temperature glides 10 °C → 30 °C at 10 °C/s. The monitor shows real
 TPS / RAM / latency telemetry.
 
 ### Demo B — Safety guard
-`Move the robot directly to sector E.` → Needle confidently (0.95) produces
+`Move the robot directly to sector E.` → Needle confidently (**~0.96**) produces
 `move_robot(E)` — a perfectly valid **tool call** — but E is not adjacent to S,
 so the controller rejects it: `REJECTED (NOT_ADJACENT)`, state unchanged.
 
@@ -147,6 +162,53 @@ changes nothing.
 adapter, plan schema, validation and execution paths are fully implemented and
 verified with fixture plans; no fake keys or canned AI responses exist in the code.
 
+## Paraphrase robustness — how Needle understands varied English
+
+You don't have to type the exact demo sentences. "Go to sector A", "Warm up
+sector A to 30 degrees", "Clean up sector C", "Stop everything right now!" all
+execute locally. This was tuned **without any fine-tuning**, using the one lever
+the Needle 2 base model exposes:
+
+**Mechanism.** Needle builds its tool-call grammar and its calibrated confidence
+from the **tool docstrings and per-argument descriptions**. Those texts are the
+model's only knowledge of what each tool means, so wording them with the verbs
+users actually say directly raises confidence on paraphrases. We enriched them
+with synonym hints, e.g.:
+
+| Tool | Description now says |
+|---|---|
+| `move_robot` | "Move, go, head, drive, or send the transport robot …" |
+| `set_temperature` | "Set, change, adjust, warm up, or cool down the target temperature …" |
+| `toggle_door` | explicit mappings: *"open the door" → open=true, "close/shut the door" → open=false* |
+| `reset_sector` | "Reset, clean, clean up, decontaminate, or clear the contamination …" |
+| `emergency_stop` | "… immediately stop everything, halt all operations, or abort …" |
+
+**Measured, not assumed.** [scripts/paraphrase_spike.py](scripts/paraphrase_spike.py)
+runs 25 paraphrased commands against the real model and counts how many produce
+the exact intended call above the 0.75 threshold:
+
+| | Local execution | Wrong actions executed |
+|---|---|---|
+| Before | 14 / 25 (56%) | 0 |
+| After | **20 / 25 (80%)** | **0** |
+
+Per action (after): move 4/6 · temperature 6/6 · door 2/5 · reset 4/4 · e-stop 4/4.
+
+**Safety-first trade-offs.** Two synonym groups were deliberately *left out*:
+
+- *"unlock/lock the door"* — the model confidently inverted the boolean
+  (`unlock` → `open=false`). Since a confident **wrong** action is worse than an
+  escalation, the words were removed from the description; "unlock" now yields
+  low confidence and routes to CLOUD instead of executing incorrectly.
+- *"take/bring/carry the cargo to …"* — reinforcing these would make Demo C's
+  goal-oriented sentence ("… transport the cargo to sector E …") match
+  `move_robot(E)` with high confidence and break its intended CLOUD escalation.
+
+Every remaining miss fails **safe**: low confidence → CLOUD escalation, never a
+wrong local execution. Demo A/B/C routing was re-verified unchanged after the
+tuning (3 runs each: LOCAL / LOCAL / CLOUD). If you edit the docstrings, re-run
+the spike to keep these properties.
+
 ## Tests
 
 ```bash
@@ -157,17 +219,17 @@ uv run pytest
 contamination/reset, damage, game-over, e-stop), the confidence router (mocked
 Needle responses), strict ExecutionPlan validation (step/wait limits, order
 contiguity, extra-field rejection) and simulation reset. No test needs network
-or a real cloud key. `scripts/needle_spike.py` measures real Needle behaviour;
-`scripts/demo_smoke.py` drives Demo A/B/C end-to-end through the real window;
-`scripts/paraphrase_spike.py` measures robustness to paraphrased English
-commands (currently 20/25 execute locally; the tool docstrings carry synonym
-hints, and every miss escalates safely to CLOUD instead of executing a wrong
-action).
+or a real cloud key. Three scripts exercise the real model:
+`scripts/needle_spike.py` (demo prompt routing), `scripts/demo_smoke.py`
+(Demo A/B/C end-to-end through the real window) and
+`scripts/paraphrase_spike.py` (paraphrase robustness, see the section above).
 
 ## Known limitations
 
 - The Needle 2 base model handles Korean poorly (measured, see above) — demo
   prompts default to English; UI labels are unaffected. Fine-tuning is out of scope.
+- Some paraphrases still escalate to CLOUD (e.g. "shut the door", targets
+  without the word *sector* like "Drive to E") — see the paraphrase section.
 - Live cloud planning was implemented and validated against fixture plans and
   strict schema tests, but not exercised against the live OpenAI API in this
   environment (no key available).
@@ -176,6 +238,13 @@ action).
 - OpenAI is the only cloud provider; the model ID is user-supplied, nothing is
   hardcoded.
 
-## Release
+## Releases
 
-v0.1.0 — initial PoC release. See the Git tag `v0.1.0`.
+| Version | Contents |
+|---|---|
+| `v0.1.0` | Initial PoC (pre-UI-polish snapshot, tag only) |
+| [`v0.1.1`](https://github.com/sinbumu/needle-factory-sim/releases/tag/v0.1.1) | Dark-themed dashboard + full hybrid-control PoC |
+| [`v0.1.2`](https://github.com/sinbumu/needle-factory-sim/releases/tag/v0.1.2) | Windows installer (`NeedleFactorySim-Setup-0.1.2.exe`) |
+
+`main` additionally carries the left-column controller/log layout and the
+paraphrase-robustness tuning (not yet in an installer build).
