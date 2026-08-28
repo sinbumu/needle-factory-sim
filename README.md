@@ -250,6 +250,4 @@ or a real cloud key. Three scripts exercise the real model:
 | `v0.1.0` | Initial PoC (pre-UI-polish snapshot, tag only) |
 | [`v0.1.1`](https://github.com/sinbumu/needle-factory-sim/releases/tag/v0.1.1) | Dark-themed dashboard + full hybrid-control PoC |
 | [`v0.1.2`](https://github.com/sinbumu/needle-factory-sim/releases/tag/v0.1.2) | Windows installer (`NeedleFactorySim-Setup-0.1.2.exe`) |
-
-`main` additionally carries the left-column controller/log layout and the
-paraphrase-robustness tuning (not yet in an installer build).
+| [`v0.1.3`](https://github.com/sinbumu/needle-factory-sim/releases/tag/v0.1.3) | First-launch tutorial, left-column controller/log layout, paraphrase-robustness tuning |
