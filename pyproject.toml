@@ -1,6 +1,6 @@
 [project]
 name = "needle-factory-sim"
-version = "0.1.0"
+version = "0.1.2"
 description = "Edge AI PoC: Needle 2 local SLM tool-calling + Cloud LLM planning, validated by a deterministic FactoryController"
 readme = "README.md"
 requires-python = ">=3.11"
@@ -13,6 +13,7 @@ dependencies = [
 
 [dependency-groups]
 dev = [
+    "pyinstaller>=6.22.2",
     "pytest>=8",
 ]
 

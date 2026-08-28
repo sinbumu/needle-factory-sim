@@ -62,7 +62,24 @@ the same thing as a valid physical action* — Demo B shows this on screen.
   provisioning (cached under `~/.cache/cactus-needle` / HuggingFace cache).
   After that, local inference runs fully offline.
 
-## Installation & Run
+## Download (Windows installer)
+
+Grab `NeedleFactorySim-Setup-<version>.exe` from the
+[Releases](https://github.com/sinbumu/needle-factory-sim/releases) page.
+It installs per-user (no admin rights needed) and adds a Start Menu entry.
+
+> The installer is not code-signed, so Windows SmartScreen will warn about an
+> unknown publisher — choose **More info → Run anyway**.
+
+The installer does not bundle the Needle engine/model; the app downloads them
+to `~/.cache/cactus-needle` on first launch (internet needed once), then local
+inference runs offline.
+
+To rebuild the installer yourself: `scripts/build_installer.ps1`
+(PyInstaller onedir via [packaging/NeedleFactorySim.spec](packaging/NeedleFactorySim.spec),
+then Inno Setup via [packaging/installer.iss](packaging/installer.iss)).
+
+## Installation & Run (from source)
 
 ```bash
 uv sync
