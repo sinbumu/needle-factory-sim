@@ -15,11 +15,12 @@ from .constants import EXECUTOR_VISUAL_STEP_DELAY_MS
 from .controller import FactoryController
 from .models import ActionResult, ExecutionPlan, SimulationStatus, WaitStep
 
-# A plan may only continue while the factory is still operable.
+# A plan may only continue while the factory is still operable. MISSION_SUCCESS
+# is excluded on purpose: it is terminal, so any remaining step would just be
+# rejected — the plan is finished successfully instead (see _advance).
 _RUNNABLE_STATUSES = frozenset(
     {
         SimulationStatus.RUNNING,
-        SimulationStatus.MISSION_SUCCESS,
         SimulationStatus.GOAL_REACHED_CLEANUP_REQUIRED,
     }
 )
@@ -109,6 +110,13 @@ class PlanExecutor(QObject):
         status = self._controller.state.status
         if status in _RUNNABLE_STATUSES:
             return False
+        if status is SimulationStatus.MISSION_SUCCESS:
+            # The goal was reached; trailing steps are unnecessary, not failures.
+            self._advance_timer.stop()
+            self._countdown_timer.stop()
+            self._skip_remaining(self._index + 1)
+            self._finish("SUCCEEDED")
+            return True
         self._advance_timer.stop()
         self._countdown_timer.stop()
         assert self._plan is not None

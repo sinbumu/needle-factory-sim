@@ -122,6 +122,31 @@ def test_cancel_after_a_step_succeeded_keeps_it_succeeded(pump):
     assert controller.state.sectors["A"].target_temperature == 30  # really applied
 
 
+def test_reaching_the_goal_finishes_the_plan_successfully(pump):
+    """Trailing steps after the mission is won are unnecessary, not failures."""
+    controller = FactoryController()
+    controller.set_temperature("A", 30)
+    controller.set_temperature("B", 30)
+    controller.advance_time(10)
+    controller.toggle_door("B", True)
+    controller.move_robot("A")
+    executor = PlanExecutor(controller)
+    rec = Recorder(executor)
+
+    executor.start(
+        plan_of(
+            step(1, "move_robot", {"target_sector": "B"}),
+            step(2, "move_robot", {"target_sector": "E"}),  # mission succeeds here
+            step(3, "set_temperature", {"sector_id": "A", "target_c": 25}),  # trailing
+        )
+    )
+    pump(lambda: rec.done, what="plan to finish")
+
+    assert rec.outcomes == ["SUCCEEDED"]
+    assert controller.state.status is SimulationStatus.MISSION_SUCCESS
+    assert rec.status_of(2)[-1] == StepStatus.SKIPPED.value
+
+
 def test_cancel_during_an_in_progress_wait_still_marks_it_cancelled(pump):
     controller = FactoryController()
     executor = PlanExecutor(controller)
