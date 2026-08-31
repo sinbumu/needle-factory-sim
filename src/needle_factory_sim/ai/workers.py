@@ -33,14 +33,19 @@ class NeedleWorker(QObject):
 
     @Slot(str, str)
     def infer(self, request_id: str, user_text: str) -> None:
-        if self._agent is None:
-            from .needle_adapter import NeedleResult
+        from .needle_adapter import NeedleResult
 
+        if self._agent is None:
             self.inference_finished.emit(
                 request_id, NeedleResult(success=False, error="Needle engine not ready")
             )
             return
-        result = run_single_command(self._agent, user_text)
+        try:
+            result = run_single_command(self._agent, user_text)
+        except Exception as exc:
+            # A result must always be emitted: the UI stays disabled until one
+            # arrives, so an escaping exception would wedge it permanently.
+            result = NeedleResult(success=False, error=f"{type(exc).__name__}: {exc}")
         self.inference_finished.emit(request_id, result)
 
     @Slot()
@@ -57,7 +62,20 @@ class CloudWorker(QObject):
 
     @Slot(str, str, str, object)
     def plan(self, request_id: str, api_key: str, model_id: str, context: object) -> None:
-        result = request_plan(api_key, model_id, context, request_id)
+        try:
+            result = request_plan(api_key, model_id, context, request_id)
+        except Exception as exc:
+            from .cloud_planner import CloudPlanResult
+
+            # As with inference: always emit, or the UI waits forever.
+            result = CloudPlanResult(
+                request_id=request_id,
+                plan=None,
+                error_category="UNKNOWN_ERROR",
+                error_message=type(exc).__name__,
+                latency_s=0.0,
+                model_id=model_id,
+            )
         self.plan_finished.emit(result)
 
 

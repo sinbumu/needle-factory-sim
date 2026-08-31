@@ -114,7 +114,11 @@ class ActionResult(BaseModel):
 
 
 class _StrictModel(BaseModel):
-    model_config = ConfigDict(extra="forbid")
+    # strict=True matters for safety, not just tidiness: in lax mode Pydantic
+    # coerces `true` to 1 and "30" to 30, so a malformed AI argument would be
+    # silently rewritten into a valid-but-wrong action and executed instead of
+    # being escalated to the Cloud planner.
+    model_config = ConfigDict(extra="forbid", strict=True)
 
 
 class MoveRobotArgs(_StrictModel):

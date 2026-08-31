@@ -7,6 +7,7 @@ is the sole executor. `agent.run()` is intentionally never used.
 
 from __future__ import annotations
 
+import math
 import time
 from dataclasses import dataclass, field
 from typing import Annotated, Any, Literal
@@ -130,8 +131,11 @@ class NeedleResult:
         if not isinstance(calls, list):
             calls = []
         calls = [c for c in calls if isinstance(c, dict)]
-        confidence = raw.get("confidence")
-        if not isinstance(confidence, (int, float)) or isinstance(confidence, bool):
+        # An unusable confidence must become None (which routes to CLOUD) rather
+        # than slip through the threshold test: NaN fails every comparison, and
+        # values outside 0..1 are not calibrated scores at all.
+        confidence = _opt_float(raw.get("confidence"))
+        if confidence is not None and not (0.0 <= confidence <= 1.0):
             confidence = None
         return cls(
             type=raw.get("type"),
@@ -140,7 +144,7 @@ class NeedleResult:
             error_code=raw.get("error_code"),
             function_calls=calls,
             reasoning=raw.get("reasoning"),
-            confidence=float(confidence) if confidence is not None else None,
+            confidence=confidence,
             prefill_tps=_opt_float(raw.get("prefill_tps")),
             decode_tps=_opt_float(raw.get("decode_tps")),
             peak_ram_mb=_opt_float(raw.get("peak_ram_mb")),
@@ -150,21 +154,32 @@ class NeedleResult:
 
 
 def _opt_float(value: Any) -> float | None:
-    if isinstance(value, (int, float)) and not isinstance(value, bool):
-        return float(value)
-    return None
+    if not isinstance(value, (int, float)) or isinstance(value, bool):
+        return None
+    try:
+        result = float(value)
+    except (OverflowError, ValueError):
+        # A JSON integer too large for a float would otherwise raise here and
+        # kill the worker slot, leaving the UI stuck on "Needle thinking…".
+        return None
+    return result if math.isfinite(result) else None
 
 
 def run_single_command(agent: "needle.Needle", user_text: str) -> NeedleResult:
-    """One user command = reset() + exactly one complete(). No agent loop."""
-    agent.reset()
+    """One user command = reset() + exactly one complete(). No agent loop.
+
+    Never raises: the caller is a Qt worker slot, and an exception escaping it
+    would leave the UI permanently disabled waiting for a result.
+    """
     started = time.monotonic()
     try:
+        # reset() re-binds the engine and can fail too, so it is inside the guard.
+        agent.reset()
         raw = agent.complete(user_text)
+        return NeedleResult.from_raw(raw, latency_s=time.monotonic() - started)
     except Exception as exc:  # inference failure must never crash the app
         return NeedleResult(
             success=False,
             error=f"{type(exc).__name__}: {exc}",
             latency_s=time.monotonic() - started,
         )
-    return NeedleResult.from_raw(raw, latency_s=time.monotonic() - started)

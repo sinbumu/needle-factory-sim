@@ -228,7 +228,7 @@ the spike to keep these properties.
 uv run pytest
 ```
 
-79 tests, run on Ubuntu and Windows by
+104 tests, run on Ubuntu and Windows by
 [CI](.github/workflows/tests.yml) on every push. They cover:
 
 - **Controller rules** — adjacency, unsafe temperature, doors,
@@ -240,8 +240,14 @@ uv run pytest
 - **Cloud planner** — context construction, structured-output handling, the
   JSON-mode fallback, error classification, and that the API key never appears
   in an error message
-- **UI widgets** — command history recall, Cloud Settings credential handling
-- **Safety regressions** — the defects fixed in v0.1.4 (see its release notes)
+- **UI widgets** — command history recall, Cloud Settings credential handling,
+  worker-thread handover on close
+- **Input hardening** — malformed AI arguments (`true`, `"30"`, fractional
+  values) must escalate to CLOUD rather than be coerced into a valid-but-wrong
+  action; unusable confidence (NaN, out of range) never routes LOCAL
+- **Terminal-state rules** — Emergency Stop cannot hide a GAME OVER, a won
+  mission is terminal, time stops when a run ends
+- **Safety regressions** — the defects fixed in v0.1.4 and v0.1.5
 
 No test needs a network, a cloud key, or a display. Scripts that exercise the
 real model separately: `scripts/needle_spike.py` (demo prompt routing),
@@ -278,3 +284,4 @@ real model separately: `scripts/needle_spike.py` (demo prompt routing),
 | [`v0.1.2`](https://github.com/sinbumu/needle-factory-sim/releases/tag/v0.1.2) | Windows installer (`NeedleFactorySim-Setup-0.1.2.exe`) |
 | [`v0.1.3`](https://github.com/sinbumu/needle-factory-sim/releases/tag/v0.1.3) | First-launch tutorial, left-column controller/log layout, paraphrase-robustness tuning |
 | [`v0.1.4`](https://github.com/sinbumu/needle-factory-sim/releases/tag/v0.1.4) | Safety-review fixes, MIT license, CI, cloud connection test, 79 tests |
+| [`v0.1.5`](https://github.com/sinbumu/needle-factory-sim/releases/tag/v0.1.5) | Strict AI-argument validation, terminal-state fixes, crash-safe workers, 104 tests |

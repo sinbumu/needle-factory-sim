@@ -33,6 +33,7 @@ from ..models import ActionResult, ExecutionPlan
 from ..plan_executor import PlanExecutor
 from ..simulation import SimulationClock
 from .ai_monitor import AIMonitor
+from . import thread_guard
 from .cloud_settings import CloudSettings, CloudSettingsDialog
 from .factory_view import FactoryView
 from .tutorial import TutorialOverlay, TutorialStep
@@ -40,11 +41,6 @@ from .tutorial import TutorialOverlay, TutorialStep
 MODE_AUTO = "AUTO"
 MODE_FORCE_LOCAL = "FORCE LOCAL"
 MODE_FORCE_CLOUD = "FORCE CLOUD"
-
-# Worker threads that were still busy at shutdown. Keeping a reference prevents
-# Qt from destroying a running QThread (which aborts the process); the OS
-# reclaims them when the process exits.
-_ORPHANED_THREADS: list[QThread] = []
 
 
 class HistoryLineEdit(QLineEdit):
@@ -588,12 +584,13 @@ class MainWindow(QMainWindow):
 
     def closeEvent(self, event) -> None:  # noqa: N802
         self.clock.pause()
-        for thread in (self.needle_thread, self.cloud_thread):
-            thread.quit()
-            if not thread.wait(3000):
-                # A worker blocked inside Needle inference or an OpenAI call
-                # cannot be interrupted. Destroying a running QThread aborts the
-                # process, so detach it and keep the object alive until exit.
+        for thread, worker in (
+            (self.needle_thread, self.needle_worker),
+            (self.cloud_thread, self.cloud_worker),
+        ):
+            # A worker blocked inside Needle inference or an OpenAI call cannot
+            # be interrupted; thread_guard keeps such a thread alive so Qt does
+            # not destroy it while it runs (see app.main()'s exit path).
+            if not thread_guard.stop_or_hand_over(thread, worker):
                 thread.setParent(None)
-                _ORPHANED_THREADS.append(thread)
         super().closeEvent(event)

@@ -72,9 +72,57 @@ def test_cloud_dialog_masks_the_api_key(qapp):
 
 def test_cloud_dialog_stops_its_worker_thread_on_close(qapp):
     dialog = CloudSettingsDialog(CloudSettings())
-    assert dialog._thread.isRunning()
+    assert dialog._thread is not None and dialog._thread.isRunning()
     dialog.done(0)
-    assert not dialog._thread.isRunning()
+    assert dialog._thread is None
+
+
+def test_closing_the_dialog_mid_test_hands_the_thread_over_instead_of_destroying_it(
+    qapp, monkeypatch
+):
+    """Destroying a QThread blocked in a network call aborts the process."""
+    import threading
+    import time as _time
+
+    from needle_factory_sim.ai import workers as workers_module
+    from needle_factory_sim.ui import thread_guard
+
+    release = threading.Event()
+
+    def blocking_test(api_key, model_id):
+        release.wait(30)  # stands in for an uncancellable network request
+        return False, "released"
+
+    monkeypatch.setattr(workers_module, "test_connection", blocking_test)
+
+    def spin(condition, timeout: float) -> bool:
+        deadline = _time.monotonic() + timeout
+        while _time.monotonic() < deadline:
+            qapp.processEvents()
+            if condition():
+                return True
+            _time.sleep(0.02)
+        return False
+
+    dialog = CloudSettingsDialog(CloudSettings(api_key="sk-x", model_id="m"))
+    dialog._on_test()
+    spin(lambda: False, 0.3)  # let the worker enter the blocking call
+
+    dialog.done(0)
+    assert dialog._thread is None
+    # The still-running thread must be owned by the guard so the app's exit path
+    # can hard-exit instead of letting Qt destroy it.
+    assert thread_guard.has_running() is True
+
+    release.set()
+    assert spin(lambda: not thread_guard.has_running(), 10), "worker never finished"
+
+
+def test_double_shutdown_is_safe(qapp):
+    dialog = CloudSettingsDialog(CloudSettings())
+    dialog.done(0)
+    dialog.close()  # closeEvent after done() must not raise
+    assert dialog._thread is None
 
 
 def test_connection_test_without_credentials_reports_an_error(qapp):

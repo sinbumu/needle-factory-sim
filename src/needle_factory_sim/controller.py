@@ -23,6 +23,17 @@ from .models import (
 )
 
 
+# Once the run is over, physics stops: temperatures must not keep drifting after
+# "GAME OVER" and a won mission must not be able to kill the cargo afterwards.
+_TIME_STOPPED_STATUSES = frozenset(
+    {
+        SimulationStatus.EMERGENCY_STOPPED,
+        SimulationStatus.GAME_OVER,
+        SimulationStatus.MISSION_SUCCESS,
+    }
+)
+
+
 class FactoryController:
     def __init__(self) -> None:
         self.state = FactoryState.initial()
@@ -46,6 +57,11 @@ class FactoryController:
             )
         if self.state.status is SimulationStatus.GAME_OVER:
             return self._reject(action, "GAME_OVER", "Cargo destroyed. Reset the simulation.")
+        if self.state.status is SimulationStatus.MISSION_SUCCESS:
+            # The mission is won; further actions could only un-win it.
+            return self._reject(
+                action, "MISSION_COMPLETE", "Mission already complete. Reset to run again."
+            )
         if self.state.cargo_hp <= 0:
             return self._reject(action, "CARGO_DESTROYED", "Cargo HP is 0.")
         return None
@@ -105,8 +121,14 @@ class FactoryController:
             return guard
         if sector_id not in self.state.sectors:
             return self._reject(action, "INVALID_SECTOR", f"Unknown sector '{sector_id}'.")
-        if not isinstance(target_c, (int, float)) or isinstance(target_c, bool):
-            return self._reject(action, "INVALID_TEMPERATURE", "Target temperature must be a number.")
+        if (
+            not isinstance(target_c, (int, float))
+            or isinstance(target_c, bool)
+            or float(target_c) != int(target_c)
+        ):
+            return self._reject(
+                action, "INVALID_TEMPERATURE", "Target temperature must be a whole number."
+            )
         if not (TEMP_SETPOINT_MIN_C <= target_c <= TEMP_SETPOINT_MAX_C):
             return self._reject(
                 action,
@@ -177,6 +199,12 @@ class FactoryController:
             return self._reject(
                 action, "EMERGENCY_STOPPED", "Simulation is already emergency-stopped."
             )
+        if self.state.status is SimulationStatus.GAME_OVER:
+            # The simulation is already halted; overwriting the status here would
+            # hide why it stopped (destroyed cargo) behind "emergency stopped".
+            return self._reject(
+                action, "GAME_OVER", "Cargo is destroyed — the simulation is already stopped."
+            )
         self.state.status = SimulationStatus.EMERGENCY_STOPPED
         return ActionResult(
             accepted=True,
@@ -202,7 +230,7 @@ class FactoryController:
         """Advance temperature transitions and cargo damage by real elapsed time."""
         if elapsed_seconds <= 0:
             return
-        if self.state.status is SimulationStatus.EMERGENCY_STOPPED:
+        if self.state.status in _TIME_STOPPED_STATUSES:
             return
         max_delta = TEMPERATURE_RATE_C_PER_SECOND * elapsed_seconds
         for sector in self.state.sectors.values():
@@ -223,10 +251,8 @@ class FactoryController:
     # ------------------------------------------------------------------ status
 
     def _update_mission_status(self) -> None:
-        if self.state.status in (
-            SimulationStatus.EMERGENCY_STOPPED,
-            SimulationStatus.GAME_OVER,
-        ):
+        # Terminal states are never re-derived; a finished run keeps its outcome.
+        if self.state.status in _TIME_STOPPED_STATUSES:
             return
         if self.state.cargo_hp <= 0:
             self.state.status = SimulationStatus.GAME_OVER

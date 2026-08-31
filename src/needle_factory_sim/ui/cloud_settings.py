@@ -19,6 +19,7 @@ from PySide6.QtWidgets import (
 
 from ..ai.workers import CloudTestWorker
 from ..constants import DEFAULT_CONFIDENCE_THRESHOLD
+from . import thread_guard
 
 
 @dataclass
@@ -80,8 +81,10 @@ class CloudSettingsDialog(QDialog):
         cancel_btn.clicked.connect(self.reject)
         self._test_btn.clicked.connect(self._on_test)
 
-        # The check is a network call, so it runs on its own thread.
-        self._thread = QThread(self)
+        # The check is a network call, so it runs on its own thread. The thread
+        # is deliberately not parented to the dialog: an in-flight request cannot
+        # be interrupted, so it must be able to outlive the dialog.
+        self._thread = QThread()
         self._worker = CloudTestWorker()
         self._worker.moveToThread(self._thread)
         self._worker.test_finished.connect(self._on_test_finished)
@@ -113,12 +116,21 @@ class CloudSettingsDialog(QDialog):
         self._status.setText(("✅ " if ok else "⛔ ") + message)
         self._status.setStyleSheet(f"color: {'#2fa066' if ok else '#c94040'};")
 
+    def _shutdown_worker(self) -> None:
+        if self._thread is None:
+            return  # already shut down (done() and closeEvent can both fire)
+        thread = self._thread
+        worker = self._worker
+        self._thread = None
+        self._worker = None
+        # A connection test already in flight cannot be interrupted, so hand the
+        # thread over instead of letting Qt destroy it while it runs.
+        thread_guard.stop_or_hand_over(thread, worker, timeout_ms=2000)
+
     def closeEvent(self, event) -> None:  # noqa: N802
-        self._thread.quit()
-        self._thread.wait(2000)
+        self._shutdown_worker()
         super().closeEvent(event)
 
     def done(self, result: int) -> None:
-        self._thread.quit()
-        self._thread.wait(2000)
+        self._shutdown_worker()
         super().done(result)

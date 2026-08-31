@@ -2,11 +2,13 @@
 
 from __future__ import annotations
 
+import os
 import sys
 
 from PySide6.QtCore import QTimer
 from PySide6.QtWidgets import QApplication
 
+from .ui import thread_guard
 from .ui.main_window import MainWindow
 from .ui.theme import apply_theme
 
@@ -32,4 +34,15 @@ def main() -> int:
 
         QTimer.singleShot(delay_ms, _grab)
 
-    return app.exec()
+    exit_code = app.exec()
+
+    if thread_guard.has_running():
+        # A worker is still stuck in Needle inference or an OpenAI request that
+        # cannot be cancelled. Normal teardown would destroy its QThread and
+        # abort the process, so leave immediately instead — the OS reclaims
+        # everything and nothing is left to flush.
+        sys.stdout.flush()
+        sys.stderr.flush()
+        os._exit(exit_code)
+
+    return exit_code

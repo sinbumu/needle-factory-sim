@@ -55,8 +55,9 @@ def decide_route(result: NeedleResult, threshold: float) -> RouteDecision:
             Route.CLOUD, f"Needle produced {len(result.function_calls)} function calls (need exactly 1)"
         )
     if result.confidence is None:
-        return RouteDecision(Route.CLOUD, "Needle confidence missing")
-    if result.confidence < threshold:
+        return RouteDecision(Route.CLOUD, "Needle confidence missing or unusable")
+    # Written as `not (>=)` so a NaN threshold cannot pass the gate either.
+    if not (result.confidence >= threshold):
         return RouteDecision(
             Route.CLOUD, f"Confidence {result.confidence:.2f} below threshold {threshold:.2f}"
         )

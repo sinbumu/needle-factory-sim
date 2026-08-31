@@ -1,3 +1,3 @@
 """Needle Factory Sim — Edge AI hybrid control PoC."""
 
-__version__ = "0.1.4"
+__version__ = "0.1.5"

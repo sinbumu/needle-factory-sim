@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import math
+
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
     QFrame,
@@ -204,7 +206,9 @@ class FactoryView(QWidget):
         for card in self._cards.values():
             card.update_from(state)
 
-        hp = round(state.cargo_hp)
+        # Round up while the cargo lives, so a sliver of HP never displays as 0
+        # (and full HP is not shown until it really is full).
+        hp = math.ceil(state.cargo_hp) if state.cargo_hp > 0 else 0
         self._hp_bar.setValue(hp)
         chunk = "#2fa066" if hp > 60 else ("#c99b2e" if hp > 30 else "#c94040")
         self._hp_bar.setStyleSheet(
