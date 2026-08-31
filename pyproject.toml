@@ -1,6 +1,6 @@
 [project]
 name = "needle-factory-sim"
-version = "0.1.5"
+version = "0.1.6"
 description = "Edge AI PoC: Needle 2 local SLM tool-calling + Cloud LLM planning, validated by a deterministic FactoryController"
 readme = "README.md"
 requires-python = ">=3.11"

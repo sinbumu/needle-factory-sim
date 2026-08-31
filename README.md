@@ -228,7 +228,7 @@ the spike to keep these properties.
 uv run pytest
 ```
 
-104 tests, run on Ubuntu and Windows by
+105 tests, run on Ubuntu and Windows by
 [CI](.github/workflows/tests.yml) on every push. They cover:
 
 - **Controller rules** — adjacency, unsafe temperature, doors,
@@ -288,3 +288,4 @@ real model separately: `scripts/needle_spike.py` (demo prompt routing),
 | [`v0.1.3`](https://github.com/sinbumu/needle-factory-sim/releases/tag/v0.1.3) | First-launch tutorial, left-column controller/log layout, paraphrase-robustness tuning |
 | [`v0.1.4`](https://github.com/sinbumu/needle-factory-sim/releases/tag/v0.1.4) | Safety-review fixes, MIT license, CI, cloud connection test, 79 tests |
 | [`v0.1.5`](https://github.com/sinbumu/needle-factory-sim/releases/tag/v0.1.5) | Strict AI-argument validation, terminal-state fixes, crash-safe workers, 104 tests |
+| [`v0.1.6`](https://github.com/sinbumu/needle-factory-sim/releases/tag/v0.1.6) | A plan that reaches the goal finishes as SUCCEEDED; 105 tests |
