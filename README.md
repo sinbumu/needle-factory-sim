@@ -268,6 +268,9 @@ real model separately: `scripts/needle_spike.py` (demo prompt routing),
   a failed step skips the remainder and reports honestly.
 - An abandoned cloud request (after Reset or Emergency Stop) cannot be cancelled
   mid-flight, so a following request queues behind it for up to the 20 s timeout.
+- The OpenAI structured-output path has not been exercised against the live API.
+  If it rejects the strict plan schema, the JSON-mode fallback handles the
+  request and the monitor says so — costing one extra round trip per command.
 - OpenAI is the only cloud provider; the model ID is user-supplied, nothing is
   hardcoded.
 
