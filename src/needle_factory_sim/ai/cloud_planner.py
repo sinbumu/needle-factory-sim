@@ -153,6 +153,10 @@ class CloudPlanResult:
     error_message: str | None
     latency_s: float
     model_id: str
+    # True when the SDK's structured-output path was unusable and the plan came
+    # from the JSON-mode fallback. Surfaced so a silently degraded (and slower)
+    # path never looks like the normal one.
+    used_json_fallback: bool = False
 
 
 def _classify_openai_error(exc: Exception) -> str:
@@ -182,6 +186,23 @@ def _sanitize(message: str, api_key: str) -> str:
     return message.replace(api_key, "***") if api_key else message
 
 
+def test_connection(api_key: str, model_id: str) -> tuple[bool, str]:
+    """Cheap credential/model check: resolve the model, no tokens generated.
+
+    Returns (ok, message). The message never contains the API key.
+    """
+    from openai import OpenAI
+
+    if not api_key or not model_id:
+        return False, "Enter both an API key and a model ID first."
+    try:
+        client = OpenAI(api_key=api_key, timeout=CLOUD_REQUEST_TIMEOUT_S, max_retries=0)
+        client.models.retrieve(model_id)
+    except Exception as exc:
+        return False, f"{_classify_openai_error(exc)}: {_sanitize(str(exc), api_key)}"
+    return True, f"Connected. Model '{model_id}' is available."
+
+
 def request_plan(
     api_key: str, model_id: str, context: dict[str, Any], request_id: str
 ) -> CloudPlanResult:
@@ -195,7 +216,9 @@ def request_plan(
 
     # The key comes from the in-memory session only and is passed explicitly;
     # environment variables are intentionally not consulted.
-    client = OpenAI(api_key=api_key, timeout=CLOUD_REQUEST_TIMEOUT_S, max_retries=1)
+    # max_retries=0 bounds an abandoned request (after Reset / E-Stop) to a
+    # single timeout instead of two, since the call itself cannot be cancelled.
+    client = OpenAI(api_key=api_key, timeout=CLOUD_REQUEST_TIMEOUT_S, max_retries=0)
     user_message = (
         "Factory context (JSON):\n"
         + json.dumps(context, ensure_ascii=False, indent=2)
@@ -208,6 +231,7 @@ def request_plan(
     ]
 
     plan: ExecutionPlan | None = None
+    used_json_fallback = False
     try:
         try:
             # Preferred: SDK structured outputs parsing straight into the schema.
@@ -231,6 +255,7 @@ def request_plan(
             # unsupported by the model/SDK combination, then validate strictly.
             if not isinstance(exc, (openai.BadRequestError, AttributeError, TypeError)):
                 raise
+            used_json_fallback = True
             schema_hint = json.dumps(ExecutionPlan.model_json_schema(), ensure_ascii=False)
             fallback_messages = [
                 messages[0],
@@ -288,4 +313,5 @@ def request_plan(
         error_message=None,
         latency_s=_elapsed(),
         model_id=model_id,
+        used_json_fallback=used_json_fallback,
     )

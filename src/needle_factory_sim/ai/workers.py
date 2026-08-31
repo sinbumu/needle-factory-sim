@@ -7,7 +7,7 @@ from __future__ import annotations
 
 from PySide6.QtCore import QObject, Signal, Slot
 
-from .cloud_planner import request_plan
+from .cloud_planner import request_plan, test_connection
 from .needle_adapter import build_agent, run_single_command
 
 
@@ -59,3 +59,14 @@ class CloudWorker(QObject):
     def plan(self, request_id: str, api_key: str, model_id: str, context: object) -> None:
         result = request_plan(api_key, model_id, context, request_id)
         self.plan_finished.emit(result)
+
+
+class CloudTestWorker(QObject):
+    """Runs the Cloud Settings connection check off the UI thread."""
+
+    test_finished = Signal(bool, str)
+
+    @Slot(str, str)
+    def test(self, api_key: str, model_id: str) -> None:
+        ok, message = test_connection(api_key, model_id)
+        self.test_finished.emit(ok, message)

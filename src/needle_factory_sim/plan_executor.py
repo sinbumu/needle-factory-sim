@@ -13,7 +13,16 @@ from PySide6.QtCore import QObject, QTimer, Signal
 
 from .constants import EXECUTOR_VISUAL_STEP_DELAY_MS
 from .controller import FactoryController
-from .models import ActionResult, ExecutionPlan, WaitStep
+from .models import ActionResult, ExecutionPlan, SimulationStatus, WaitStep
+
+# A plan may only continue while the factory is still operable.
+_RUNNABLE_STATUSES = frozenset(
+    {
+        SimulationStatus.RUNNING,
+        SimulationStatus.MISSION_SUCCESS,
+        SimulationStatus.GOAL_REACHED_CLEANUP_REQUIRED,
+    }
+)
 
 
 class StepStatus(str, Enum):
@@ -38,6 +47,9 @@ class PlanExecutor(QObject):
         self._plan: ExecutionPlan | None = None
         self._index = -1
         self._running = False
+        # True once the current step has reached a terminal status, so a later
+        # cancel() does not relabel work the controller already applied.
+        self._current_step_done = True
 
         self._advance_timer = QTimer(self)
         self._advance_timer.setSingleShot(True)
@@ -58,6 +70,7 @@ class PlanExecutor(QObject):
         self._plan = plan
         self._index = -1
         self._running = True
+        self._current_step_done = True
         self._advance()
 
     def cancel(self) -> None:
@@ -66,7 +79,10 @@ class PlanExecutor(QObject):
         self._advance_timer.stop()
         self._countdown_timer.stop()
         if self._plan and 0 <= self._index < len(self._plan.steps):
-            self.step_status_changed.emit(self._index, StepStatus.CANCELLED.value)
+            # Only an in-progress step becomes CANCELLED; a step the controller
+            # already accepted keeps its SUCCEEDED status (nothing is rolled back).
+            if not self._current_step_done:
+                self.step_status_changed.emit(self._index, StepStatus.CANCELLED.value)
             self._skip_remaining(self._index + 1)
         self._running = False
         self.plan_finished.emit("CANCELLED")
@@ -84,20 +100,55 @@ class PlanExecutor(QObject):
         self._countdown_timer.stop()
         self.plan_finished.emit(outcome)
 
+    def _abort_if_factory_not_operable(self) -> bool:
+        """Stop the plan as soon as the factory can no longer act on it.
+
+        Without this a plan keeps waiting (up to the full wait duration) after
+        the cargo is already destroyed, and would report that wait as succeeded.
+        """
+        status = self._controller.state.status
+        if status in _RUNNABLE_STATUSES:
+            return False
+        self._advance_timer.stop()
+        self._countdown_timer.stop()
+        assert self._plan is not None
+        if 0 <= self._index < len(self._plan.steps) and not self._current_step_done:
+            self.step_status_changed.emit(self._index, StepStatus.FAILED.value)
+            self.step_result.emit(
+                self._index,
+                ActionResult(
+                    accepted=False,
+                    action=self._plan.steps[self._index].action,
+                    state_changed=False,
+                    error_code=status.value,
+                    message=f"Plan aborted: simulation is {status.value}.",
+                ),
+            )
+            self._current_step_done = True
+        self._skip_remaining(self._index + 1)
+        self._finish("FAILED")
+        return True
+
     def _advance(self) -> None:
         if not self._running or self._plan is None:
             return
         self._countdown_timer.stop()
-        if 0 <= self._index < len(self._plan.steps) and isinstance(
-            self._plan.steps[self._index], WaitStep
+        if self._abort_if_factory_not_operable():
+            return
+        if (
+            0 <= self._index < len(self._plan.steps)
+            and isinstance(self._plan.steps[self._index], WaitStep)
+            and not self._current_step_done
         ):
             self.step_status_changed.emit(self._index, StepStatus.SUCCEEDED.value)
             self.wait_countdown.emit(self._index, 0.0)
+            self._current_step_done = True
         self._index += 1
         if self._index >= len(self._plan.steps):
             self._finish("SUCCEEDED")
             return
         step = self._plan.steps[self._index]
+        self._current_step_done = False
 
         if isinstance(step, WaitStep):
             self.step_status_changed.emit(self._index, StepStatus.WAITING.value)
@@ -112,14 +163,21 @@ class PlanExecutor(QObject):
         self.step_result.emit(self._index, result)
         if result.accepted:
             self.step_status_changed.emit(self._index, StepStatus.SUCCEEDED.value)
+            self._current_step_done = True
             # Presentation pacing only — factory time keeps running meanwhile.
             self._advance_timer.start(EXECUTOR_VISUAL_STEP_DELAY_MS)
         else:
             self.step_status_changed.emit(self._index, StepStatus.FAILED.value)
+            self._current_step_done = True
             self._skip_remaining(self._index + 1)
             self._finish("FAILED")
 
     def _on_countdown_tick(self) -> None:
+        # Also the poll that ends a wait early when the factory becomes
+        # inoperable — otherwise the plan would idle for the full wait duration
+        # after the cargo is already destroyed.
+        if self._abort_if_factory_not_operable():
+            return
         # Display-only countdown; step completion is owned by _advance().
         self._wait_remaining = max(0.0, self._wait_remaining - 0.25)
         self.wait_countdown.emit(self._index, self._wait_remaining)

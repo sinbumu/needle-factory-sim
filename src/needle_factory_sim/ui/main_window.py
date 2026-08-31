@@ -22,6 +22,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from .. import __version__
 from ..ai.cloud_planner import CloudPlanResult, build_planner_context
 from ..ai.needle_adapter import NeedleResult
 from ..ai.router import Route, decide_route
@@ -40,6 +41,43 @@ MODE_AUTO = "AUTO"
 MODE_FORCE_LOCAL = "FORCE LOCAL"
 MODE_FORCE_CLOUD = "FORCE CLOUD"
 
+# Worker threads that were still busy at shutdown. Keeping a reference prevents
+# Qt from destroying a running QThread (which aborts the process); the OS
+# reclaims them when the process exits.
+_ORPHANED_THREADS: list[QThread] = []
+
+
+class HistoryLineEdit(QLineEdit):
+    """Command input with Up/Down recall of previously executed commands."""
+
+    def __init__(self, parent: QWidget | None = None) -> None:
+        super().__init__(parent)
+        self._history: list[str] = []
+        self._pos = 0  # == len(history) means "editing a new line"
+        self._draft = ""
+
+    def remember(self, text: str) -> None:
+        if text and (not self._history or self._history[-1] != text):
+            self._history.append(text)
+        self._pos = len(self._history)
+        self._draft = ""
+
+    def keyPressEvent(self, event) -> None:  # noqa: N802
+        key = event.key()
+        if key == Qt.Key.Key_Up and self._history:
+            if self._pos == len(self._history):
+                self._draft = self.text()
+            self._pos = max(0, self._pos - 1)
+            self.setText(self._history[self._pos])
+            return
+        if key == Qt.Key.Key_Down and self._history and self._pos < len(self._history):
+            self._pos += 1
+            self.setText(
+                self._history[self._pos] if self._pos < len(self._history) else self._draft
+            )
+            return
+        super().keyPressEvent(event)
+
 
 class MainWindow(QMainWindow):
     _infer_requested = Signal(str, str)  # request_id, text
@@ -48,12 +86,13 @@ class MainWindow(QMainWindow):
 
     def __init__(self) -> None:
         super().__init__()
-        self.setWindowTitle("Needle Factory Sim")
+        self.setWindowTitle(f"Needle Factory Sim v{__version__}")
         self.resize(1180, 720)
 
         self.controller = FactoryController()
         self.cloud_settings = CloudSettings()  # API key: process memory only
         self.busy: str | None = None  # LOCAL_INFERENCE | CLOUD_PLANNING | PLAN_EXECUTING
+        self.emergency_stopped = False
         self.active_request_id: str | None = None
         self._current_command_text = ""
 
@@ -92,6 +131,9 @@ class MainWindow(QMainWindow):
         title = QLabel("Needle Factory Sim")
         title.setStyleSheet("font-weight: bold; font-size: 16px;")
         top.addWidget(title)
+        version_label = QLabel(f"v{__version__}")
+        version_label.setStyleSheet("color: #9aa3b2;")
+        top.addWidget(version_label)
         self.engine_label = QLabel("● Needle: INITIALIZING…")
         self.engine_label.setStyleSheet("color: #c99b2e; font-weight: bold;")
         top.addWidget(self.engine_label)
@@ -134,8 +176,8 @@ class MainWindow(QMainWindow):
 
         # Bottom: command input + demo presets
         bottom = QHBoxLayout()
-        self.input_edit = QLineEdit()
-        self.input_edit.setPlaceholderText("Command for the factory AI…")
+        self.input_edit = HistoryLineEdit()
+        self.input_edit.setPlaceholderText("Command for the factory AI…  (↑ / ↓ for history)")
         self.input_edit.returnPressed.connect(self._on_execute)
         bottom.addWidget(self.input_edit, stretch=1)
         self.demo_buttons: list[QPushButton] = []
@@ -163,9 +205,10 @@ class MainWindow(QMainWindow):
         self.needle_worker.moveToThread(self.needle_thread)
         self.needle_thread.started.connect(self.needle_worker.initialize)
         self.needle_worker.engine_state_changed.connect(self._on_engine_state)
-        self.needle_worker.engine_error.connect(
-            lambda msg: self.monitor.append_log(f"[needle] engine error: {msg}")
-        )
+        # Must be a bound method, not a lambda: a lambda has no QObject receiver,
+        # so Qt would use the sender's thread and run this slot on the worker
+        # thread — touching widgets off the GUI thread.
+        self.needle_worker.engine_error.connect(self._on_engine_error)
         self.needle_worker.inference_finished.connect(self._on_needle_result)
         self._infer_requested.connect(self.needle_worker.infer)
         self._needle_reset_requested.connect(self.needle_worker.reset_conversation)
@@ -182,19 +225,26 @@ class MainWindow(QMainWindow):
 
     def _set_busy(self, phase: str | None) -> None:
         self.busy = phase
-        enabled = phase is None
         busy_texts = {
             "LOCAL_INFERENCE": "Needle thinking…",
             "CLOUD_PLANNING": "Cloud planning…",
             "PLAN_EXECUTING": "Executing plan…",
         }
         self.execute_btn.setText(busy_texts.get(phase, "Execute ▶"))
+        # Emergency-stopped is a second, independent reason to stay disabled;
+        # clearing `busy` must never silently re-enable commands after an E-Stop.
+        enabled = phase is None and not self.emergency_stopped
         self.input_edit.setEnabled(enabled)
         self.execute_btn.setEnabled(enabled)
         for btn in self.demo_buttons:
             btn.setEnabled(enabled)
         self.mode_combo.setEnabled(enabled)
+        # Opening the tutorial pauses the world, so it must not be reachable
+        # while an inference or plan is in flight.
+        self.tutorial_btn.setEnabled(phase is None)
         # Emergency Stop and Reset stay enabled at all times.
+        if self.emergency_stopped:
+            self.execute_btn.setText("Emergency stopped — Reset to continue")
 
     def _refresh_view(self) -> None:
         self.factory_view.update_from(self.controller.state)
@@ -206,6 +256,9 @@ class MainWindow(QMainWindow):
 
     def _on_tick(self, _elapsed: float) -> None:
         self._refresh_view()
+
+    def _on_engine_error(self, message: str) -> None:
+        self.monitor.append_log(f"[needle] engine error: {message}")
 
     def _on_engine_state(self, state: str) -> None:
         pretty, color = {
@@ -234,6 +287,7 @@ class MainWindow(QMainWindow):
         request_id = str(uuid.uuid4())
         self.active_request_id = request_id
         self._current_command_text = text
+        self.input_edit.remember(text)
         self.monitor.begin_command(text, mode, self.cloud_settings.threshold)
         self.monitor.set_cloud_configured(
             self.cloud_settings.configured, self.cloud_settings.model_id
@@ -317,7 +371,13 @@ class MainWindow(QMainWindow):
 
         plan = result.plan
         assert plan is not None
-        self.monitor.cloud_group.set("status", "PLAN RECEIVED")
+        if result.used_json_fallback:
+            self.monitor.cloud_group.set("status", "PLAN RECEIVED (JSON fallback)")
+            self.monitor.append_log(
+                "[cloud] structured output unavailable — used JSON-mode fallback"
+            )
+        else:
+            self.monitor.cloud_group.set("status", "PLAN RECEIVED")
         self.monitor.cloud_group.set("validation", "PASSED")
         self.monitor.cloud_group.set("summary", plan.summary)
         if plan.status == "cannot_plan":
@@ -393,23 +453,21 @@ class MainWindow(QMainWindow):
         self.executor.cancel()
         result = self.controller.emergency_stop()
         self.monitor.append_log(f"[e-stop] {result.message}")
-        self._set_busy(None)
-        self._set_normal_inputs_enabled(False)
+        self.emergency_stopped = True
+        self._set_busy(None)  # honours emergency_stopped and keeps inputs disabled
         self._refresh_view()
-
-    def _set_normal_inputs_enabled(self, enabled: bool) -> None:
-        self.input_edit.setEnabled(enabled)
-        self.execute_btn.setEnabled(enabled)
-        for btn in self.demo_buttons:
-            btn.setEnabled(enabled)
-        self.mode_combo.setEnabled(enabled)
 
     def _do_reset(self) -> None:
         self.active_request_id = None
         self.executor.cancel()
         self._needle_reset_requested.emit()
         self.controller.reset_simulation()
+        self.emergency_stopped = False
         self._set_busy(None)
+        self.monitor.clear_for_reset()
+        self.monitor.set_cloud_configured(
+            self.cloud_settings.configured, self.cloud_settings.model_id
+        )
         self._refresh_view()
 
     def _on_reset(self) -> None:
@@ -495,6 +553,11 @@ class MainWindow(QMainWindow):
     def _show_tutorial(self) -> None:
         if self._tutorial is not None and self._tutorial.isVisible():
             return
+        # The overlay covers the whole window, including Emergency Stop, so the
+        # world must not keep running underneath it — otherwise the cargo could
+        # take damage the user is unable to stop.
+        self.clock.pause()
+        self.monitor.append_log("[tutorial] simulation paused for the tour")
         self._tutorial = TutorialOverlay(self, self._tutorial_steps())
         self._tutorial.finished.connect(self._on_tutorial_finished)
         self._tutorial.start()
@@ -504,6 +567,8 @@ class MainWindow(QMainWindow):
         if self._tutorial is not None:
             self._tutorial.deleteLater()
             self._tutorial = None
+        self.clock.resume()
+        self.monitor.append_log("[tutorial] simulation resumed")
 
     # ------------------------------------------------------------------ cloud
 
@@ -522,7 +587,13 @@ class MainWindow(QMainWindow):
     # ------------------------------------------------------------------ close
 
     def closeEvent(self, event) -> None:  # noqa: N802
+        self.clock.pause()
         for thread in (self.needle_thread, self.cloud_thread):
             thread.quit()
-            thread.wait(2000)
+            if not thread.wait(3000):
+                # A worker blocked inside Needle inference or an OpenAI call
+                # cannot be interrupted. Destroying a running QThread aborts the
+                # process, so detach it and keep the object alive until exit.
+                thread.setParent(None)
+                _ORPHANED_THREADS.append(thread)
         super().closeEvent(event)

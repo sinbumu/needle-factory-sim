@@ -1,5 +1,8 @@
 # Needle Factory Sim
 
+[![tests](https://github.com/sinbumu/needle-factory-sim/actions/workflows/tests.yml/badge.svg)](https://github.com/sinbumu/needle-factory-sim/actions/workflows/tests.yml)
+[![license: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+
 **Edge AI hybrid control PoC** — a desktop factory simulation where a 14MB local
 SLM (**Needle 2**) converts explicit natural-language commands into tool-call
 candidates, a **Cloud LLM** (OpenAI) plans multi-step goal-oriented missions, and a
@@ -61,6 +64,8 @@ Dark-themed single-window dashboard (PySide6, no image assets):
   control (map, command input, demos, routing, cloud settings, monitor,
   e-stop, reset). It appears automatically only on the very first launch and
   can be reopened anytime with the **❓ Tutorial** button in the top bar.
+- Command input keeps a history — **↑ / ↓** recalls previously executed
+  commands; the event log is timestamped.
 
 - **Left**: the 2×3 factory map as temperature-gradient sector cards (blue =
   cold, green = safe, red = hot) with kind icons, door/contamination badges and
@@ -126,6 +131,9 @@ Engine binaries are never committed to this repository.
   files, registry, logs, or the monitor, and it is gone when the app exits.
 - `Reset Simulation` keeps the key/model/threshold; restarting the app does not.
 - The monitor only ever shows `Cloud: Configured` / `Cloud: Not configured`.
+- **Test connection** verifies the key and model ID before you rely on them
+  (it resolves the model, so it spends no tokens) and reports failures with the
+  key redacted.
 
 Routing modes: `AUTO` (Needle first, escalate on low confidence), `FORCE LOCAL`
 (no cloud escalation), `FORCE CLOUD` (skips Needle; the monitor shows
@@ -220,14 +228,26 @@ the spike to keep these properties.
 uv run pytest
 ```
 
-42 tests cover the controller rules (adjacency, unsafe temperature, door,
-contamination/reset, damage, game-over, e-stop), the confidence router (mocked
-Needle responses), strict ExecutionPlan validation (step/wait limits, order
-contiguity, extra-field rejection) and simulation reset. No test needs network
-or a real cloud key. Three scripts exercise the real model:
-`scripts/needle_spike.py` (demo prompt routing), `scripts/demo_smoke.py`
-(Demo A/B/C end-to-end through the real window) and
-`scripts/paraphrase_spike.py` (paraphrase robustness, see the section above).
+79 tests, run on Ubuntu and Windows by
+[CI](.github/workflows/tests.yml) on every push. They cover:
+
+- **Controller rules** — adjacency, unsafe temperature, doors,
+  contamination/reset, cargo damage, game over, emergency stop, reset
+- **Confidence routing** — mocked Needle responses, including malformed ones
+- **Plan validation** — step/wait limits, order contiguity, extra-field rejection
+- **Plan executor** — sequencing, wait steps, cancellation, failure policy, and
+  re-validation against live state rather than the planning snapshot
+- **Cloud planner** — context construction, structured-output handling, the
+  JSON-mode fallback, error classification, and that the API key never appears
+  in an error message
+- **UI widgets** — command history recall, Cloud Settings credential handling
+- **Safety regressions** — the defects fixed in v0.1.4 (see its release notes)
+
+No test needs a network, a cloud key, or a display. Scripts that exercise the
+real model separately: `scripts/needle_spike.py` (demo prompt routing),
+`scripts/paraphrase_spike.py` (paraphrase robustness),
+`scripts/demo_smoke.py` (Demo A/B/C end-to-end) and
+`scripts/safety_check.py` (window-level emergency-stop / reset / tutorial checks).
 
 ## Known limitations
 
@@ -240,8 +260,14 @@ or a real cloud key. Three scripts exercise the real model:
   environment (no key available).
 - One plan at a time (single-flight); no rollback of already-succeeded steps —
   a failed step skips the remainder and reports honestly.
+- An abandoned cloud request (after Reset or Emergency Stop) cannot be cancelled
+  mid-flight, so a following request queues behind it for up to the 20 s timeout.
 - OpenAI is the only cloud provider; the model ID is user-supplied, nothing is
   hardcoded.
+
+## License
+
+[MIT](LICENSE)
 
 ## Releases
 
@@ -251,3 +277,4 @@ or a real cloud key. Three scripts exercise the real model:
 | [`v0.1.1`](https://github.com/sinbumu/needle-factory-sim/releases/tag/v0.1.1) | Dark-themed dashboard + full hybrid-control PoC |
 | [`v0.1.2`](https://github.com/sinbumu/needle-factory-sim/releases/tag/v0.1.2) | Windows installer (`NeedleFactorySim-Setup-0.1.2.exe`) |
 | [`v0.1.3`](https://github.com/sinbumu/needle-factory-sim/releases/tag/v0.1.3) | First-launch tutorial, left-column controller/log layout, paraphrase-robustness tuning |
+| [`v0.1.4`](https://github.com/sinbumu/needle-factory-sim/releases/tag/v0.1.4) | Safety-review fixes, MIT license, CI, cloud connection test, 79 tests |

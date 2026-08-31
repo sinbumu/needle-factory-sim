@@ -20,3 +20,10 @@ Thumbs.db
 # Secrets must never exist as files, but guard anyway
 .env
 *.key
+
+# Local scratch file holding a git-config dump (personal paths / email)
+vds
+
+# Build output
+dist/
+build/

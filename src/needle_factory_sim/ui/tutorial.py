@@ -122,6 +122,10 @@ class TutorialOverlay(QWidget):
 
     def _target_rect(self) -> QRect:
         widget = self._steps[self._index].widget
+        if not widget.isVisible() or widget.width() <= 0 or widget.height() <= 0:
+            # Nothing sensible to spotlight — highlight nothing rather than
+            # cutting a bogus hole out of the overlay.
+            return QRect()
         top_left = widget.mapTo(self.parentWidget(), QPoint(0, 0))
         return QRect(top_left, widget.size()).adjusted(-6, -6, 6, 6)
 
@@ -158,11 +162,15 @@ class TutorialOverlay(QWidget):
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
         overlay_path = QPainterPath()
         overlay_path.addRect(self.rect())
+        target = self._target_rect()
+        if target.isNull():
+            painter.fillPath(overlay_path, QColor(0, 0, 0, 170))
+            return
         cutout = QPainterPath()
-        cutout.addRoundedRect(self._target_rect(), 8, 8)
+        cutout.addRoundedRect(target, 8, 8)
         painter.fillPath(overlay_path.subtracted(cutout), QColor(0, 0, 0, 170))
         painter.setPen(QPen(QColor("#4f8cff"), 2))
-        painter.drawRoundedRect(self._target_rect(), 8, 8)
+        painter.drawRoundedRect(target, 8, 8)
 
     # ------------------------------------------------------------------ input
 
@@ -173,6 +181,10 @@ class TutorialOverlay(QWidget):
             self._next()
         elif event.key() == Qt.Key.Key_Left:
             self._back()
+        elif event.key() in (Qt.Key.Key_Tab, Qt.Key.Key_Backtab):
+            # Keep focus inside the tour: tabbing through to the controls
+            # underneath would let them be activated blind.
+            event.accept()
         else:
             super().keyPressEvent(event)
 

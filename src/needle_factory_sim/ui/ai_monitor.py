@@ -4,6 +4,7 @@ execution progress. Never displays the API key (not even partially).
 
 from __future__ import annotations
 
+import time
 from typing import Any
 
 from PySide6.QtWidgets import (
@@ -153,7 +154,7 @@ class AIMonitor(QWidget):
     # ------------------------------------------------------------------ API
 
     def append_log(self, text: str) -> None:
-        self.log.appendPlainText(text)
+        self.log.appendPlainText(f"{time.strftime('%H:%M:%S')}  {text}")
 
     def begin_command(self, text: str, mode: str, threshold: float) -> None:
         self.route_group.clear_all()
@@ -168,6 +169,18 @@ class AIMonitor(QWidget):
         self.route_group.set("input", text)
         self.route_group.set("mode", mode)
         self.route_group.set("threshold", f"{threshold:.2f}")
+
+    def clear_for_reset(self) -> None:
+        """Drop the previous run's verdicts so nothing looks still-pending."""
+        self.route_group.clear_all()
+        for key in ("confidence", "call", "arguments", "reasoning", "prefill_tps",
+                    "decode_tps", "peak_ram", "latency", "error"):
+            self.local_group.set(key, NA)
+        for key in ("status", "latency", "validation", "summary", "wait"):
+            self.cloud_group.set(key, NA)
+        self.controller_group.clear_all()
+        self.controller_group.labels["result"].setStyleSheet("")
+        self.steps_table.setRowCount(0)
 
     def set_engine_state(self, state: str) -> None:
         suffix = " — Local inference available" if state == "READY" else ""

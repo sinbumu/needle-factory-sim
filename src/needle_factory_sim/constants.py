@@ -31,6 +31,9 @@ TEMP_SETPOINT_MIN_C = 0
 TEMP_SETPOINT_MAX_C = 60
 
 SIMULATION_TICK_MS = 100
+# Upper bound on the time a single tick may apply. Guards against clock jumps
+# (system suspend/resume) turning one tick into hours of simulated damage.
+MAX_TICK_ELAPSED_S = 0.25
 EXECUTOR_VISUAL_STEP_DELAY_MS = 400
 
 DEFAULT_CONFIDENCE_THRESHOLD = 0.75
