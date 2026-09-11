@@ -232,6 +232,65 @@ wrong local execution. Demo A/B/C routing was re-verified unchanged after the
 tuning (3 runs each: LOCAL / LOCAL / CLOUD). If you edit the docstrings, re-run
 the spike to keep these properties.
 
+### Short commands: why they escalate, and why that is left alone
+
+Terse commands — `move robot to a`, `go to A`, `reset C` — score 0.2–0.7 and
+escalate to the Cloud planner, which costs a few seconds for what looks like a
+trivial instruction. We tried to fix that and could not; the record is here
+because the *reason* turned out to matter more than the fix.
+
+`uv run python scripts/paraphrase_spike.py --terse` runs the 17 short commands
+used below. Baseline: **4/17** execute locally.
+
+**What we tried and what it cost**
+
+| Attempt | Result |
+|---|---|
+| Add examples and naming rules to the tool descriptions ("the word *sector* is optional", "lower case names the same sector") | **2/17 — worse.** Longer descriptions depress confidence across the board; even `stop` fell 0.90 → 0.70 |
+| Strip the descriptions back to one line each | 4/17 — different cases pass, same total |
+| Widen the tool grammar to accept lower-case letters (`Literal[... "a", "b", ...]`) | **Worse.** Confidence collapsed to 0.26–0.41 and extraction stayed unreliable |
+
+Description wording moves *which* phrasings pass, not how many. This looks like
+a capability limit of a 14MB model rather than something prompt-shaped.
+
+**The finding that settled it.** Sweeping one template over every sector letter
+in both cases (`--letter-case`) shows the model does not merely lose confidence
+on lower-case input — it extracts the **wrong sector**:
+
+| Input | Confidence | Extracted |
+|---|---|---|
+| `move robot to sector A` | 0.92 | A ✔ |
+| `move robot to sector a` | 0.60 | **S** ✗ |
+| `move robot to sector b` | 0.22–0.60 | **S** ✗ |
+| `move robot to sector c` | 0.53–0.65 | **S** ✗ |
+| `move robot to sector e` | 0.22–0.59 | **S** ✗ |
+
+With a lower-case letter *and* the word "sector", it answers sector **S**
+whatever was asked for. So the obvious way to "accept simpler commands" —
+lowering the confidence threshold to ~0.6 — would not have admitted more
+correct actions. It would have admitted **confidently wrong** ones: ask for
+sector B, get the robot sent to S.
+
+The threshold therefore stays at 0.75, and short commands keep escalating. That
+is the safety boundary doing its job, not a gap in it: a small model that is
+unsure does not fail silently, it fails *wrong*, and the gate is what catches
+it. The sweep is a guard, not just a report — it exits non-zero if any wrong
+extraction ever scores above the threshold (currently the worst is 0.60).
+
+**If you want local, low-latency handling**, use the full form; these are the
+measured reliable shapes:
+
+```text
+Move the robot to sector A.          → 0.92–0.96   LOCAL
+Set sector A temperature to 30.      → 0.81–0.94   LOCAL
+Open the door of sector B.           → 0.95        LOCAL
+```
+
+A regex pre-parser would make the short forms work, and is deliberately not
+used: "Needle turns natural language into constrained tool calls" is the claim
+this PoC exists to demonstrate, and intercepting the easy cases in Python would
+quietly hollow it out.
+
 ## Tests
 
 ```bash
@@ -263,10 +322,15 @@ uv run pytest
 - **Safety regressions** — the defects fixed in v0.1.4 and v0.1.5
 
 No test needs a network, a cloud key, or a display. Scripts that exercise the
-real model separately: `scripts/needle_spike.py` (demo prompt routing),
-`scripts/paraphrase_spike.py` (paraphrase robustness),
-`scripts/demo_smoke.py` (Demo A/B/C end-to-end) and
-`scripts/safety_check.py` (window-level emergency-stop / reset / tutorial checks).
+real model separately:
+
+| Script | What it measures |
+|---|---|
+| `scripts/needle_spike.py` | Demo prompt routing, repeated runs, KR and EN |
+| `scripts/paraphrase_spike.py` | Paraphrase robustness (`--terse` for short commands, `--letter-case` for the sector-letter sweep) |
+| `scripts/demo_smoke.py` | Demo A/B/C end-to-end through the real window |
+| `scripts/safety_check.py` | Emergency stop / reset / tutorial at the window level |
+| `NeedleFactorySim.exe --selfcheck <file>` | Packaged build: provider adapters and top-bar handlers |
 
 ## Known limitations
 
