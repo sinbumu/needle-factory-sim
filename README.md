@@ -103,7 +103,11 @@ inference runs offline.
 
 To rebuild the installer yourself: `scripts/build_installer.ps1`
 (PyInstaller onedir via [packaging/NeedleFactorySim.spec](packaging/NeedleFactorySim.spec),
-then Inno Setup via [packaging/installer.iss](packaging/installer.iss)).
+then Inno Setup via [packaging/installer.iss](packaging/installer.iss)). The
+script refuses to produce an installer unless the packaged app passes its own
+self-check — `NeedleFactorySim.exe --selfcheck <report.txt>` loads every cloud
+provider adapter and runs the top-bar handlers off-screen, writing the result to
+a file because the packaged app has no console.
 
 ## Installation & Run (from source)
 
@@ -297,4 +301,5 @@ real model separately: `scripts/needle_spike.py` (demo prompt routing),
 | [`v0.1.4`](https://github.com/sinbumu/needle-factory-sim/releases/tag/v0.1.4) | Safety-review fixes, MIT license, CI, cloud connection test, 79 tests |
 | [`v0.1.5`](https://github.com/sinbumu/needle-factory-sim/releases/tag/v0.1.5) | Strict AI-argument validation, terminal-state fixes, crash-safe workers, 104 tests |
 | [`v0.1.6`](https://github.com/sinbumu/needle-factory-sim/releases/tag/v0.1.6) | A plan that reaches the goal finishes as SUCCEEDED; 105 tests |
-| [`v0.2.0`](https://github.com/sinbumu/needle-factory-sim/releases/tag/v0.2.0) | Cloud planner supports OpenAI, Anthropic (Claude) and Google (Gemini); 124 tests |
+| `v0.2.0` | Multi-provider cloud planner — **superseded by v0.2.1** (its installer was broken) |
+| [`v0.2.1`](https://github.com/sinbumu/needle-factory-sim/releases/tag/v0.2.1) | Fixes the packaged build dropping the provider adapters; 124 tests |

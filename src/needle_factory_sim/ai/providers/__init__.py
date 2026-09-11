@@ -3,11 +3,15 @@
 Adapter modules are imported lazily so launching the app (and the frozen
 build's startup) never pays for three SDKs, and so a missing optional SDK only
 breaks the provider that needs it.
+
+The imports in `get_adapter` are written out one per provider rather than
+resolved from a name: a computed `importlib.import_module()` is invisible to
+PyInstaller's static analysis, which silently left every adapter out of the
+packaged build and made each button that touches a provider look dead.
 """
 
 from __future__ import annotations
 
-import importlib
 from types import ModuleType
 
 from .base import (
@@ -18,12 +22,6 @@ from .base import (
     sanitize,
 )
 
-_MODULES: dict[CloudProvider, str] = {
-    CloudProvider.OPENAI: "openai_provider",
-    CloudProvider.ANTHROPIC: "anthropic_provider",
-    CloudProvider.GEMINI: "gemini_provider",
-}
-
 _LABELS: dict[CloudProvider, str] = {
     CloudProvider.OPENAI: "OpenAI",
     CloudProvider.ANTHROPIC: "Anthropic (Claude)",
@@ -32,7 +30,15 @@ _LABELS: dict[CloudProvider, str] = {
 
 
 def get_adapter(provider: CloudProvider) -> ModuleType:
-    return importlib.import_module(f".{_MODULES[provider]}", __name__)
+    if provider is CloudProvider.OPENAI:
+        from . import openai_provider as adapter
+    elif provider is CloudProvider.ANTHROPIC:
+        from . import anthropic_provider as adapter
+    elif provider is CloudProvider.GEMINI:
+        from . import gemini_provider as adapter
+    else:  # pragma: no cover - CloudProvider is exhaustive
+        raise ValueError(f"unknown provider: {provider!r}")
+    return adapter
 
 
 def label(provider: CloudProvider) -> str:
@@ -50,7 +56,7 @@ def spec(provider: CloudProvider) -> ProviderSpec:
 
 
 def all_providers() -> list[CloudProvider]:
-    return list(_MODULES)
+    return list(_LABELS)
 
 
 __all__ = [
