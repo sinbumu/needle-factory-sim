@@ -238,7 +238,7 @@ the spike to keep these properties.
 uv run pytest
 ```
 
-124 tests, run on Ubuntu and Windows by
+129 tests, run on Ubuntu and Windows by
 [CI](.github/workflows/tests.yml) on every push. They cover:
 
 - **Controller rules** — adjacency, unsafe temperature, doors,
@@ -281,9 +281,18 @@ real model separately: `scripts/needle_spike.py` (demo prompt routing),
   a failed step skips the remainder and reports honestly.
 - An abandoned cloud request (after Reset or Emergency Stop) cannot be cancelled
   mid-flight, so a following request queues behind it for up to the 20 s timeout.
-- No provider's structured-output path has been exercised against a live API.
-  If one rejects the strict plan schema, that provider's JSON fallback handles
-  the request and the monitor says so — costing one extra round trip.
+- **Gemini always uses the JSON fallback** (the monitor says so, which is
+  expected, not a fault): google-genai converts a Pydantic model into its own
+  `Schema` type and rejects the `discriminator` key our tagged union emits, so
+  the schema travels in the prompt instead and the reply is validated strictly.
+  Its own `response_json_schema` mode was tried and rejected — the API accepts
+  it but does not enforce the union, returning steps with another action's
+  arguments. OpenAI's and Anthropic's structured-output paths have not been
+  exercised against a live API yet.
+- Verified live against Gemini: `gemini-2.5-flash` plans Demo C correctly.
+  Newer preview models can be heavily loaded and answer `503 high demand` or
+  `504 deadline exceeded`; the monitor reports that as `SERVER_ERROR` and the
+  command can simply be run again.
 - Model IDs are always user-supplied — nothing is hardcoded for any provider.
 
 ## License
@@ -303,3 +312,4 @@ real model separately: `scripts/needle_spike.py` (demo prompt routing),
 | [`v0.1.6`](https://github.com/sinbumu/needle-factory-sim/releases/tag/v0.1.6) | A plan that reaches the goal finishes as SUCCEEDED; 105 tests |
 | `v0.2.0` | Multi-provider cloud planner — **superseded by v0.2.1** (its installer was broken) |
 | [`v0.2.1`](https://github.com/sinbumu/needle-factory-sim/releases/tag/v0.2.1) | Fixes the packaged build dropping the provider adapters; 124 tests |
+| [`v0.2.2`](https://github.com/sinbumu/needle-factory-sim/releases/tag/v0.2.2) | Gemini fixes (client lifetime, schema fallback), verified live; 129 tests |

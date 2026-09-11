@@ -87,7 +87,10 @@ def _strip_code_fence(text: str) -> str:
 
 
 def test_connection(api_key: str, model_id: str, timeout_s: float) -> None:
-    _client(api_key, timeout_s).models.retrieve(model_id)
+    # Keep the client referenced for the duration of the call (see the note in
+    # gemini_provider.test_connection).
+    client = _client(api_key, timeout_s)
+    client.models.retrieve(model_id)
 
 
 def classify_error(exc: Exception) -> str:

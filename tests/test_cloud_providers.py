@@ -323,3 +323,134 @@ def test_a_provider_whose_sdk_is_missing_reports_cleanly(monkeypatch):
     result = request_plan(CloudProvider.ANTHROPIC, FAKE_KEY, "m", context(), "req-x")
     assert result.plan is None
     assert result.error_category == "PROVIDER_UNAVAILABLE"
+
+
+# ----------------------------------------------- client lifetime regression
+
+
+class _Transport:
+    """Stands in for the SDK's shared HTTP transport."""
+
+    def __init__(self) -> None:
+        self.closed = False
+
+    def request(self):
+        if self.closed:
+            raise RuntimeError("Cannot send a request, as the client has been closed.")
+        return {"ok": True}
+
+
+class _Models:
+    """Mirrors the real SDKs: the sub-client holds the transport, not the client."""
+
+    def __init__(self, transport: _Transport) -> None:
+        self._transport = transport
+
+    def get(self, **kwargs):
+        return self._transport.request()
+
+    def retrieve(self, *args, **kwargs):
+        return self._transport.request()
+
+
+class _SelfClosingClient:
+    """Mimics genai.Client: closes its transport when garbage-collected.
+
+    Chaining off a temporary (`_client(...).models.get(...)`) let the client be
+    collected before the request was sent, which reached the user as a bare
+    UNKNOWN_ERROR on Test connection.
+    """
+
+    def __init__(self, **kwargs) -> None:
+        self._transport = _Transport()
+        self.models = _Models(self._transport)
+
+    def __del__(self) -> None:
+        self._transport.closed = True
+
+
+@pytest.mark.parametrize(
+    "provider, sdk_module, client_attr",
+    [
+        (CloudProvider.GEMINI, "google.genai", "Client"),
+        (CloudProvider.OPENAI, "openai", "OpenAI"),
+        (CloudProvider.ANTHROPIC, "anthropic", "Anthropic"),
+    ],
+)
+def test_test_connection_keeps_the_client_alive(monkeypatch, provider, sdk_module, client_attr):
+    import gc
+    import importlib
+
+    from needle_factory_sim.ai.cloud_planner import test_connection
+
+    module = importlib.import_module(sdk_module)
+
+    def make_client(**kwargs):
+        client = _SelfClosingClient(**kwargs)
+        # Force the collector to run while the adapter is mid-call: a dropped
+        # reference must not be what decides whether the request goes out.
+        gc.collect()
+        return client
+
+    monkeypatch.setattr(module, client_attr, make_client)
+    ok, message = test_connection(provider, "key-123", "some-model")
+    assert ok is True, message
+    assert "has been closed" not in message
+
+
+def test_gemini_schema_rejection_falls_back_instead_of_blaming_the_plan(monkeypatch):
+    """google-genai rejects our tagged-union schema before sending anything.
+
+    That is "this provider can't take the schema", not "the model returned a
+    bad plan" — reporting PLAN_VALIDATION_FAILED hid a working fallback.
+    """
+    from pydantic import BaseModel, ConfigDict, ValidationError as PydanticValidationError
+
+    class _Strict(BaseModel):
+        model_config = ConfigDict(extra="forbid")
+
+    def schema_conversion_error() -> Exception:
+        try:
+            _Strict.model_validate({"discriminator": {"propertyName": "action"}})
+        except PydanticValidationError as exc:
+            return exc
+        raise AssertionError("expected a ValidationError")
+
+    attempts: list[dict] = []
+
+    def generate(**kwargs):
+        attempts.append(kwargs)
+        if len(attempts) == 1:
+            raise schema_conversion_error()
+        return _GeminiResponse(parsed=None, text=json.dumps(VALID_PLAN_JSON))
+
+    install_fake_gemini(monkeypatch, generate=generate)
+    result = request_plan(CloudProvider.GEMINI, FAKE_KEY, "m", context(), "req-x")
+
+    assert result.error_category is None, result.error_message
+    assert result.plan is not None
+    assert result.used_json_fallback is True
+    assert len(attempts) == 2
+    assert attempts[1]["config"].response_schema is None
+
+
+def test_gemini_bad_plan_from_the_fallback_is_still_a_validation_failure(monkeypatch):
+    """The real thing PLAN_VALIDATION_FAILED is for must keep reporting it."""
+    bad = dict(VALID_PLAN_JSON)
+    bad["steps"] = [
+        {
+            "order": 1,
+            "action": "toggle_door",
+            # target_c belongs to set_temperature — exactly what Gemini emitted
+            # when its own json-schema mode failed to enforce the union.
+            "arguments": {"sector_id": "B", "open": True, "target_c": 30},
+            "reason": "r",
+        }
+    ]
+    install_fake_gemini(
+        monkeypatch,
+        generate=lambda **kw: _GeminiResponse(parsed=None, text=json.dumps(bad)),
+    )
+    result = request_plan(CloudProvider.GEMINI, FAKE_KEY, "m", context(), "req-x")
+    assert result.plan is None
+    assert result.error_category == "PLAN_VALIDATION_FAILED"

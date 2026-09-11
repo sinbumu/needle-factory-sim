@@ -30,6 +30,7 @@ def request_plan(
     from google.genai import errors, types
 
     client = _client(api_key, timeout_s)
+    response = None
     try:
         response = client.models.generate_content(
             model=model_id,
@@ -40,30 +41,31 @@ def request_plan(
                 response_schema=ExecutionPlan,
             ),
         )
+    except ValidationError:
+        # Raised while google-genai converts ExecutionPlan into its own Schema
+        # type, before anything is sent: it rejects the `discriminator` key our
+        # tagged union emits. Nothing reached the model, so this is "schema
+        # unsupported", not a bad plan — retry with the schema in the prompt.
+        # (Measured 2026-09-11 with google-genai 2.23: always rejected.)
+        pass
+    except errors.ClientError as exc:
+        # Only a 400 means "I don't accept this schema". Auth, quota and
+        # not-found failures must surface instead of burning a second request.
+        if getattr(exc, "code", None) != 400:
+            raise
+    except (TypeError, ValueError):
+        pass
+
+    if response is not None:
         plan = getattr(response, "parsed", None)
         if isinstance(plan, ExecutionPlan):
             return PlanAttempt(plan=plan)
         # Some models return the JSON text without a parsed object.
         if response.text:
-            return PlanAttempt(plan=ExecutionPlan.model_validate_json(response.text))
+            return PlanAttempt(plan=_validate(response.text))
         raise CloudPlannerError(
             "INVALID_STRUCTURED_RESPONSE", "Model returned no plan content"
         )
-    except CloudPlannerError:
-        raise
-    except ValidationError as verr:
-        raise CloudPlannerError(
-            "PLAN_VALIDATION_FAILED", f"Cloud response failed validation: {verr}"
-        ) from verr
-    except Exception as exc:
-        # Only a 400 means "I don't accept this schema" — retry with the schema
-        # in the prompt instead. An auth, quota or network failure must surface
-        # immediately rather than burn a second round trip.
-        schema_rejected = (
-            isinstance(exc, errors.ClientError) and getattr(exc, "code", None) == 400
-        )
-        if not (schema_rejected or isinstance(exc, (TypeError, ValueError))):
-            raise
 
     schema = json.dumps(ExecutionPlan.model_json_schema(), ensure_ascii=False)
     response = client.models.generate_content(
@@ -74,17 +76,26 @@ def request_plan(
             response_mime_type="application/json",
         ),
     )
+    return PlanAttempt(plan=_validate(response.text or ""), used_json_fallback=True)
+
+
+def _validate(text: str) -> ExecutionPlan:
+    """A failure here really is the model's plan being wrong, not our request."""
     try:
-        plan = ExecutionPlan.model_validate_json(response.text or "")
+        return ExecutionPlan.model_validate_json(text)
     except ValidationError as verr:
         raise CloudPlannerError(
             "PLAN_VALIDATION_FAILED", f"Cloud response failed validation: {verr}"
         ) from verr
-    return PlanAttempt(plan=plan, used_json_fallback=True)
 
 
 def test_connection(api_key: str, model_id: str, timeout_s: float) -> None:
-    _client(api_key, timeout_s).models.get(model=model_id)
+    # The client must stay referenced for the whole call: genai.Client closes
+    # its underlying httpx client when it is garbage-collected, so chaining off
+    # a temporary fails with "Cannot send a request, as the client has been
+    # closed" before the request is ever made.
+    client = _client(api_key, timeout_s)
+    client.models.get(model=model_id)
 
 
 def classify_error(exc: Exception) -> str:
