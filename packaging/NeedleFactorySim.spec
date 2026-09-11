@@ -40,7 +40,14 @@ a = Analysis(
     pathex=[str(ROOT / "src")],
     binaries=[],
     datas=[],
-    hiddenimports=["huggingface_hub"],
+    # Provider SDKs are imported lazily inside functions and google.genai is a
+    # namespace package, so they are named explicitly rather than inferred.
+    hiddenimports=[
+        "huggingface_hub",
+        "anthropic",
+        "openai",
+        "google.genai",
+    ],
     hookspath=[],
     runtime_hooks=[],
     excludes=EXCLUDES,

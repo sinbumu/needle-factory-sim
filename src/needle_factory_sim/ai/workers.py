@@ -9,6 +9,7 @@ from PySide6.QtCore import QObject, Signal, Slot
 
 from .cloud_planner import request_plan, test_connection
 from .needle_adapter import build_agent, run_single_command
+from .providers import CloudProvider
 
 
 class NeedleWorker(QObject):
@@ -60,10 +61,19 @@ class NeedleWorker(QObject):
 class CloudWorker(QObject):
     plan_finished = Signal(object)  # CloudPlanResult
 
-    @Slot(str, str, str, object)
-    def plan(self, request_id: str, api_key: str, model_id: str, context: object) -> None:
+    @Slot(str, str, str, str, object)
+    def plan(
+        self,
+        request_id: str,
+        provider: str,
+        api_key: str,
+        model_id: str,
+        context: object,
+    ) -> None:
         try:
-            result = request_plan(api_key, model_id, context, request_id)
+            result = request_plan(
+                CloudProvider(provider), api_key, model_id, context, request_id
+            )
         except Exception as exc:
             from .cloud_planner import CloudPlanResult
 
@@ -75,6 +85,7 @@ class CloudWorker(QObject):
                 error_message=type(exc).__name__,
                 latency_s=0.0,
                 model_id=model_id,
+                provider=CloudProvider(provider),
             )
         self.plan_finished.emit(result)
 
@@ -84,7 +95,10 @@ class CloudTestWorker(QObject):
 
     test_finished = Signal(bool, str)
 
-    @Slot(str, str)
-    def test(self, api_key: str, model_id: str) -> None:
-        ok, message = test_connection(api_key, model_id)
+    @Slot(str, str, str)
+    def test(self, provider: str, api_key: str, model_id: str) -> None:
+        try:
+            ok, message = test_connection(CloudProvider(provider), api_key, model_id)
+        except Exception as exc:
+            ok, message = False, f"{type(exc).__name__}: {exc}"
         self.test_finished.emit(ok, message)

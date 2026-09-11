@@ -77,7 +77,8 @@ class HistoryLineEdit(QLineEdit):
 
 class MainWindow(QMainWindow):
     _infer_requested = Signal(str, str)  # request_id, text
-    _plan_requested = Signal(str, str, str, object)  # request_id, api_key, model_id, context
+    # request_id, provider, api_key, model_id, context
+    _plan_requested = Signal(str, str, str, str, object)
     _needle_reset_requested = Signal()
 
     def __init__(self) -> None:
@@ -286,7 +287,9 @@ class MainWindow(QMainWindow):
         self.input_edit.remember(text)
         self.monitor.begin_command(text, mode, self.cloud_settings.threshold)
         self.monitor.set_cloud_configured(
-            self.cloud_settings.configured, self.cloud_settings.model_id
+            self.cloud_settings.configured,
+            self.cloud_settings.model_id,
+            self.cloud_settings.provider_label,
         )
 
         if mode == MODE_FORCE_CLOUD:
@@ -344,7 +347,11 @@ class MainWindow(QMainWindow):
         self.monitor.cloud_group.set("status", "PLANNING…")
         self.monitor.append_log(f"[cloud] planning started ({request_id[:8]})")
         self._plan_requested.emit(
-            request_id, self.cloud_settings.api_key, self.cloud_settings.model_id, context
+            request_id,
+            self.cloud_settings.provider.value,
+            self.cloud_settings.api_key,
+            self.cloud_settings.model_id,
+            context,
         )
 
     def _on_cloud_result(self, result: CloudPlanResult) -> None:
@@ -462,7 +469,9 @@ class MainWindow(QMainWindow):
         self._set_busy(None)
         self.monitor.clear_for_reset()
         self.monitor.set_cloud_configured(
-            self.cloud_settings.configured, self.cloud_settings.model_id
+            self.cloud_settings.configured,
+            self.cloud_settings.model_id,
+            self.cloud_settings.provider_label,
         )
         self._refresh_view()
 
@@ -573,7 +582,9 @@ class MainWindow(QMainWindow):
         if dialog.exec() and dialog.result_settings is not None:
             self.cloud_settings = dialog.result_settings
             self.monitor.set_cloud_configured(
-                self.cloud_settings.configured, self.cloud_settings.model_id
+                self.cloud_settings.configured,
+                self.cloud_settings.model_id,
+                self.cloud_settings.provider_label,
             )
             self.monitor.append_log(
                 "[cloud] settings applied for this session "

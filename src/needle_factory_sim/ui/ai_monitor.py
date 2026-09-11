@@ -125,7 +125,6 @@ class AIMonitor(QWidget):
                 ("wait", "Wait countdown"),
             ],
         )
-        self.cloud_group.set("provider", "OpenAI")
         self.cloud_group.set("configured", "Cloud: Not configured")
         layout.addWidget(self.cloud_group)
 
@@ -215,7 +214,10 @@ class AIMonitor(QWidget):
         )
         self.route_group.set("reason", reason)
 
-    def set_cloud_configured(self, configured: bool, model_id: str) -> None:
+    def set_cloud_configured(
+        self, configured: bool, model_id: str, provider_label: str = "OpenAI"
+    ) -> None:
+        self.cloud_group.set("provider", provider_label)
         self.cloud_group.set(
             "configured", "Cloud: Configured" if configured else "Cloud: Not configured"
         )

@@ -13,6 +13,7 @@ import pytest
 
 from needle_factory_sim.ai import cloud_planner
 from needle_factory_sim.ai.cloud_planner import build_planner_context, request_plan
+from needle_factory_sim.ai.providers import CloudProvider
 from needle_factory_sim.constants import (
     PLAN_MAX_SINGLE_WAIT_S,
     PLAN_MAX_STEPS,
@@ -165,7 +166,7 @@ def test_structured_output_plan_is_returned(monkeypatch):
     plan = ExecutionPlan.model_validate(VALID_PLAN_JSON)
     calls = install_fake_client(monkeypatch, parse=lambda **kw: _Completion(_Message(parsed=plan)))
 
-    result = request_plan(FAKE_KEY, "some-model", context(), "req-x")
+    result = request_plan(CloudProvider.OPENAI, FAKE_KEY, "some-model", context(), "req-x")
 
     assert result.error_category is None
     assert result.plan is not None
@@ -179,14 +180,14 @@ def test_model_refusal_is_reported_not_executed(monkeypatch):
     install_fake_client(
         monkeypatch, parse=lambda **kw: _Completion(_Message(refusal="I cannot help"))
     )
-    result = request_plan(FAKE_KEY, "m", context(), "req-x")
+    result = request_plan(CloudProvider.OPENAI, FAKE_KEY, "m", context(), "req-x")
     assert result.plan is None
     assert result.error_category == "INVALID_STRUCTURED_RESPONSE"
 
 
 def test_missing_parsed_plan_is_reported(monkeypatch):
     install_fake_client(monkeypatch, parse=lambda **kw: _Completion(_Message(parsed=None)))
-    result = request_plan(FAKE_KEY, "m", context(), "req-x")
+    result = request_plan(CloudProvider.OPENAI, FAKE_KEY, "m", context(), "req-x")
     assert result.plan is None
     assert result.error_category == "INVALID_STRUCTURED_RESPONSE"
 
@@ -197,7 +198,7 @@ def test_falls_back_to_json_mode_when_structured_output_is_unavailable(monkeypat
         monkeypatch,
         create=lambda **kw: _Completion(_Message(content=json.dumps(VALID_PLAN_JSON))),
     )
-    result = request_plan(FAKE_KEY, "m", context(), "req-x")
+    result = request_plan(CloudProvider.OPENAI, FAKE_KEY, "m", context(), "req-x")
 
     assert result.error_category is None
     assert result.plan is not None and len(result.plan.steps) == 3
@@ -218,7 +219,7 @@ def test_invalid_json_from_fallback_fails_validation(monkeypatch):
     install_fake_client(
         monkeypatch, create=lambda **kw: _Completion(_Message(content=json.dumps(bad)))
     )
-    result = request_plan(FAKE_KEY, "m", context(), "req-x")
+    result = request_plan(CloudProvider.OPENAI, FAKE_KEY, "m", context(), "req-x")
     assert result.plan is None
     assert result.error_category == "PLAN_VALIDATION_FAILED"
 
@@ -228,7 +229,7 @@ def test_api_key_is_never_included_in_an_error_message(monkeypatch):
         raise RuntimeError(f"upstream rejected key {FAKE_KEY} for this request")
 
     install_fake_client(monkeypatch, parse=explode)
-    result = request_plan(FAKE_KEY, "m", context(), "req-x")
+    result = request_plan(CloudProvider.OPENAI, FAKE_KEY, "m", context(), "req-x")
 
     assert result.plan is None
     assert FAKE_KEY not in (result.error_message or "")
@@ -253,7 +254,7 @@ def test_api_key_is_passed_explicitly_and_not_read_from_the_environment(monkeypa
             )()
 
     monkeypatch.setattr(openai, "OpenAI", FakeOpenAI)
-    request_plan(FAKE_KEY, "m", context(), "req-x")
+    request_plan(CloudProvider.OPENAI, FAKE_KEY, "m", context(), "req-x")
 
     assert captured["api_key"] == FAKE_KEY
     assert captured["timeout"] == cloud_planner.CLOUD_REQUEST_TIMEOUT_S
@@ -262,7 +263,7 @@ def test_api_key_is_passed_explicitly_and_not_read_from_the_environment(monkeypa
 @pytest.mark.parametrize("latency_field", ["latency_s"])
 def test_result_always_carries_request_metadata(monkeypatch, latency_field):
     install_fake_client(monkeypatch, parse=lambda **kw: _Completion(_Message(parsed=None)))
-    result = request_plan(FAKE_KEY, "model-z", context(), "req-42")
+    result = request_plan(CloudProvider.OPENAI, FAKE_KEY, "model-z", context(), "req-42")
     assert result.request_id == "req-42"
     assert result.model_id == "model-z"
     assert getattr(result, latency_field) >= 0

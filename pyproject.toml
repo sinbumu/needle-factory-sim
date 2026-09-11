@@ -1,6 +1,6 @@
 [project]
 name = "needle-factory-sim"
-version = "0.1.6"
+version = "0.2.0"
 description = "Edge AI PoC: Needle 2 local SLM tool-calling + Cloud LLM planning, validated by a deterministic FactoryController"
 readme = "README.md"
 requires-python = ">=3.11"
@@ -9,6 +9,8 @@ dependencies = [
     "PySide6",
     "pydantic>=2.7",
     "openai>=1.40",
+    "anthropic>=1.5.0",
+    "google-genai>=2.23.0",
 ]
 
 [dependency-groups]

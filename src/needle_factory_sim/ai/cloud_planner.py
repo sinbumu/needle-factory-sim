@@ -1,7 +1,10 @@
-"""Cloud planner: builds the full factory snapshot context and asks an OpenAI
-model for a structured ExecutionPlan. The Cloud LLM never executes tools; its
-plan is strictly validated and then executed step-by-step by PlanExecutor
-through the deterministic FactoryController.
+"""Cloud planner: builds the full factory snapshot context and asks the selected
+cloud provider for a structured ExecutionPlan. The Cloud LLM never executes
+tools; its plan is strictly validated and then executed step-by-step by
+PlanExecutor through the deterministic FactoryController.
+
+Provider-specific SDK work lives in `providers/`; everything here — the system
+contract, the context snapshot and the result shape — is provider-agnostic.
 """
 
 from __future__ import annotations
@@ -28,6 +31,13 @@ from ..constants import (
     TEMPERATURE_RATE_C_PER_SECOND,
 )
 from ..models import ExecutionPlan, FactoryState, SectorKind
+from .providers import (
+    CloudPlannerError,
+    CloudProvider,
+    get_adapter,
+    label,
+    sanitize,
+)
 
 CLOUD_SYSTEM_PROMPT = """You are a deterministic planning component for a factory simulation.
 
@@ -139,12 +149,6 @@ def build_planner_context(
     }
 
 
-class CloudPlannerError(Exception):
-    def __init__(self, category: str, message: str) -> None:
-        super().__init__(message)
-        self.category = category
-
-
 @dataclass
 class CloudPlanResult:
     request_id: str
@@ -153,165 +157,90 @@ class CloudPlanResult:
     error_message: str | None
     latency_s: float
     model_id: str
-    # True when the SDK's structured-output path was unusable and the plan came
-    # from the JSON-mode fallback. Surfaced so a silently degraded (and slower)
+    provider: CloudProvider = CloudProvider.OPENAI
+    # True when the provider's structured-output path was unusable and the plan
+    # came from a JSON fallback. Surfaced so a silently degraded (and slower)
     # path never looks like the normal one.
     used_json_fallback: bool = False
 
 
-def _classify_openai_error(exc: Exception) -> str:
-    import openai
-
-    if isinstance(exc, openai.AuthenticationError):
-        return "AUTHENTICATION_ERROR"
-    if isinstance(exc, openai.PermissionDeniedError):
-        return "PERMISSION_ERROR"
-    if isinstance(exc, openai.RateLimitError):
-        return "RATE_LIMIT"
-    if isinstance(exc, openai.APITimeoutError):
-        return "TIMEOUT"
-    if isinstance(exc, openai.APIConnectionError):
-        return "NETWORK_ERROR"
-    if isinstance(exc, openai.NotFoundError):
-        return "UNSUPPORTED_MODEL"
-    if isinstance(exc, openai.BadRequestError):
-        return "BAD_REQUEST"
-    if isinstance(exc, openai.OpenAIError):
-        return "OPENAI_ERROR"
-    return "UNKNOWN_ERROR"
-
-
-def _sanitize(message: str, api_key: str) -> str:
-    # An error text must never leak the session API key.
-    return message.replace(api_key, "***") if api_key else message
-
-
-def test_connection(api_key: str, model_id: str) -> tuple[bool, str]:
-    """Cheap credential/model check: resolve the model, no tokens generated.
-
-    Returns (ok, message). The message never contains the API key.
-    """
-    from openai import OpenAI
-
-    if not api_key or not model_id:
-        return False, "Enter both an API key and a model ID first."
-    try:
-        client = OpenAI(api_key=api_key, timeout=CLOUD_REQUEST_TIMEOUT_S, max_retries=0)
-        client.models.retrieve(model_id)
-    except Exception as exc:
-        return False, f"{_classify_openai_error(exc)}: {_sanitize(str(exc), api_key)}"
-    return True, f"Connected. Model '{model_id}' is available."
-
-
-def request_plan(
-    api_key: str, model_id: str, context: dict[str, Any], request_id: str
-) -> CloudPlanResult:
-    """Blocking OpenAI call — must run on the Cloud worker thread, never the UI thread."""
-    from openai import OpenAI
-
-    started = time.monotonic()
-
-    def _elapsed() -> float:
-        return time.monotonic() - started
-
-    # The key comes from the in-memory session only and is passed explicitly;
-    # environment variables are intentionally not consulted.
-    # max_retries=0 bounds an abandoned request (after Reset / E-Stop) to a
-    # single timeout instead of two, since the call itself cannot be cancelled.
-    client = OpenAI(api_key=api_key, timeout=CLOUD_REQUEST_TIMEOUT_S, max_retries=0)
-    user_message = (
+def _user_message(context: dict[str, Any]) -> str:
+    return (
         "Factory context (JSON):\n"
         + json.dumps(context, ensure_ascii=False, indent=2)
         + "\n\nUser request:\n"
         + str(context.get("user_request", ""))
     )
-    messages = [
-        {"role": "system", "content": CLOUD_SYSTEM_PROMPT},
-        {"role": "user", "content": user_message},
-    ]
 
-    plan: ExecutionPlan | None = None
-    used_json_fallback = False
+
+def test_connection(
+    provider: CloudProvider, api_key: str, model_id: str
+) -> tuple[bool, str]:
+    """Cheap credential/model check: resolve the model, no tokens generated.
+
+    Returns (ok, message). The message never contains the API key.
+    """
+    if not api_key or not model_id:
+        return False, "Enter both an API key and a model ID first."
+    adapter = get_adapter(provider)
     try:
-        try:
-            # Preferred: SDK structured outputs parsing straight into the schema.
-            completion = client.chat.completions.parse(
-                model=model_id, messages=messages, response_format=ExecutionPlan
-            )
-            message = completion.choices[0].message
-            if getattr(message, "refusal", None):
-                raise CloudPlannerError("INVALID_STRUCTURED_RESPONSE", str(message.refusal))
-            plan = message.parsed
-            if plan is None:
-                raise CloudPlannerError(
-                    "INVALID_STRUCTURED_RESPONSE", "Model returned no parsed plan"
-                )
-        except CloudPlannerError:
-            raise
-        except Exception as exc:
-            import openai
-
-            # Fall back to plain JSON mode only when structured outputs are
-            # unsupported by the model/SDK combination, then validate strictly.
-            if not isinstance(exc, (openai.BadRequestError, AttributeError, TypeError)):
-                raise
-            used_json_fallback = True
-            schema_hint = json.dumps(ExecutionPlan.model_json_schema(), ensure_ascii=False)
-            fallback_messages = [
-                messages[0],
-                {
-                    "role": "user",
-                    "content": user_message
-                    + "\n\nReturn ONLY a JSON object conforming to this JSON Schema:\n"
-                    + schema_hint,
-                },
-            ]
-            completion = client.chat.completions.create(
-                model=model_id,
-                messages=fallback_messages,
-                response_format={"type": "json_object"},
-            )
-            content = completion.choices[0].message.content or ""
-            try:
-                plan = ExecutionPlan.model_validate_json(content)
-            except ValidationError as verr:
-                raise CloudPlannerError(
-                    "PLAN_VALIDATION_FAILED", f"Cloud response failed validation: {verr}"
-                ) from verr
-    except CloudPlannerError as cpe:
-        return CloudPlanResult(
-            request_id=request_id,
-            plan=None,
-            error_category=cpe.category,
-            error_message=_sanitize(str(cpe), api_key),
-            latency_s=_elapsed(),
-            model_id=model_id,
-        )
-    except ValidationError as verr:
-        return CloudPlanResult(
-            request_id=request_id,
-            plan=None,
-            error_category="PLAN_VALIDATION_FAILED",
-            error_message=_sanitize(str(verr), api_key),
-            latency_s=_elapsed(),
-            model_id=model_id,
-        )
+        adapter.test_connection(api_key, model_id, CLOUD_REQUEST_TIMEOUT_S)
     except Exception as exc:
+        category = adapter.classify_error(exc)
+        return False, f"{category}: {sanitize(str(exc), api_key)}"
+    return True, f"Connected. Model '{model_id}' is available on {label(provider)}."
+
+
+def request_plan(
+    provider: CloudProvider,
+    api_key: str,
+    model_id: str,
+    context: dict[str, Any],
+    request_id: str,
+) -> CloudPlanResult:
+    """Blocking provider call — must run on the Cloud worker thread, never the UI."""
+    started = time.monotonic()
+
+    def result(
+        plan: ExecutionPlan | None = None,
+        category: str | None = None,
+        message: str | None = None,
+        used_json_fallback: bool = False,
+    ) -> CloudPlanResult:
         return CloudPlanResult(
             request_id=request_id,
-            plan=None,
-            error_category=_classify_openai_error(exc),
-            error_message=_sanitize(f"{type(exc).__name__}: {exc}", api_key),
-            latency_s=_elapsed(),
+            plan=plan,
+            error_category=category,
+            error_message=sanitize(message, api_key) if message else None,
+            latency_s=time.monotonic() - started,
             model_id=model_id,
+            provider=provider,
+            used_json_fallback=used_json_fallback,
         )
 
-    return CloudPlanResult(
-        request_id=request_id,
-        plan=plan,
-        error_category=None,
-        error_message=None,
-        latency_s=_elapsed(),
-        model_id=model_id,
-        used_json_fallback=used_json_fallback,
-    )
+    try:
+        adapter = get_adapter(provider)
+    except Exception as exc:  # the provider's SDK is missing from this build
+        return result(category="PROVIDER_UNAVAILABLE", message=f"{type(exc).__name__}: {exc}")
+
+    # The API key comes from the in-memory session only and is passed explicitly;
+    # environment variables are intentionally never consulted.
+    try:
+        attempt = adapter.request_plan(
+            api_key,
+            model_id,
+            CLOUD_SYSTEM_PROMPT,
+            _user_message(context),
+            CLOUD_REQUEST_TIMEOUT_S,
+        )
+    except CloudPlannerError as cpe:
+        return result(category=cpe.category, message=str(cpe))
+    except ValidationError as verr:
+        return result(category="PLAN_VALIDATION_FAILED", message=str(verr))
+    except Exception as exc:
+        return result(
+            category=adapter.classify_error(exc),
+            message=f"{type(exc).__name__}: {exc}",
+        )
+
+    return result(plan=attempt.plan, used_json_fallback=attempt.used_json_fallback)

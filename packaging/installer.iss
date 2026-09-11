@@ -3,7 +3,7 @@
 ; then compile this script with ISCC.exe.
 
 #define MyAppName "Needle Factory Sim"
-#define MyAppVersion "0.1.6"
+#define MyAppVersion "0.2.0"
 #define MyAppPublisher "sinbumu"
 #define MyAppURL "https://github.com/sinbumu/needle-factory-sim"
 #define MyAppExeName "NeedleFactorySim.exe"

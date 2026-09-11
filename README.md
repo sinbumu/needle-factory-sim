@@ -5,9 +5,10 @@
 
 **Edge AI hybrid control PoC** — a desktop factory simulation where a 14MB local
 SLM (**Needle 2**) converts explicit natural-language commands into tool-call
-candidates, a **Cloud LLM** (OpenAI) plans multi-step goal-oriented missions, and a
-**deterministic FactoryController** is the only component allowed to change the
-factory state — no matter which AI produced the command.
+candidates, a **Cloud LLM** (OpenAI, Anthropic Claude or Google Gemini) plans
+multi-step goal-oriented missions, and a **deterministic FactoryController** is
+the only component allowed to change the factory state — no matter which AI
+produced the command.
 
 ![screenshot](docs/screenshot.png)
 
@@ -32,7 +33,7 @@ flowchart TD
     N --> D{confidence >= threshold<br/>exactly 1 valid call?}
     D -->|yes: LOCAL| FC[FactoryController<br/>deterministic validation]
     D -->|no: CLOUD| CTX[CloudPlannerContext<br/>full state snapshot + rules]
-    CTX --> O[OpenAI Planner<br/>structured output only]
+    CTX --> O[Cloud Planner<br/>OpenAI / Claude / Gemini<br/>structured output only]
     O --> V[PlanValidator<br/>Pydantic strict]
     V --> PE[PlanExecutor<br/>step-by-step + wait]
     PE --> FC
@@ -41,7 +42,7 @@ flowchart TD
 
 ### Local vs Cloud roles
 
-| | Local (Needle 2) | Cloud (OpenAI) |
+| | Local (Needle 2) | Cloud (OpenAI / Claude / Gemini) |
 |---|---|---|
 | Sees | Only the user's sentence | Full factory snapshot + explicit rules |
 | Produces | Exactly one tool-call **candidate** | A structured **ExecutionPlan** (max 8 steps, `wait` allowed) |
@@ -121,11 +122,16 @@ The first `Needle(...)` initialization downloads the engine + base model; the UI
 shows `Needle: INITIALIZING...` → `READY (local inference available)`.
 Engine binaries are never committed to this repository.
 
-## Cloud Settings (session-only API key)
+## Cloud Settings (session-only API keys)
 
-`Cloud Settings` opens a dialog with **Provider (OpenAI, fixed)**, **API Key**
-(password-masked), **Model ID** (your choice, e.g. `gpt-4.1`) and the
-**Confidence Threshold** (default 0.75).
+`Cloud Settings` opens a dialog with a **Provider** dropdown — **OpenAI**,
+**Anthropic (Claude)** or **Google (Gemini)** — plus **API Key**
+(password-masked), **Model ID** (your choice; the field hints at a valid one per
+provider) and the **Confidence Threshold** (default 0.75).
+
+Each provider keeps its own key/model slot, so switching the dropdown never
+discards what you already typed, and you can keep all three configured in one
+session and switch planners between runs.
 
 - The API key lives **only in process memory** — never written to `.env`, config
   files, registry, logs, or the monitor, and it is gone when the app exits.
@@ -133,7 +139,7 @@ Engine binaries are never committed to this repository.
 - The monitor only ever shows `Cloud: Configured` / `Cloud: Not configured`.
 - **Test connection** verifies the key and model ID before you rely on them
   (it resolves the model, so it spends no tokens) and reports failures with the
-  key redacted.
+  key redacted. It tests whichever provider is selected.
 
 Routing modes: `AUTO` (Needle first, escalate on low confidence), `FORCE LOCAL`
 (no cloud escalation), `FORCE CLOUD` (skips Needle; the monitor shows
@@ -228,7 +234,7 @@ the spike to keep these properties.
 uv run pytest
 ```
 
-105 tests, run on Ubuntu and Windows by
+124 tests, run on Ubuntu and Windows by
 [CI](.github/workflows/tests.yml) on every push. They cover:
 
 - **Controller rules** — adjacency, unsafe temperature, doors,
@@ -237,9 +243,12 @@ uv run pytest
 - **Plan validation** — step/wait limits, order contiguity, extra-field rejection
 - **Plan executor** — sequencing, wait steps, cancellation, failure policy, and
   re-validation against live state rather than the planning snapshot
-- **Cloud planner** — context construction, structured-output handling, the
-  JSON-mode fallback, error classification, and that the API key never appears
-  in an error message
+- **Cloud planner** — context construction, structured-output handling, each
+  provider's JSON fallback, error classification, and that the API key never
+  appears in an error message
+- **Provider adapters** — OpenAI, Anthropic and Gemini request shapes (schema,
+  system prompt, timeout units), fallback only when the structured path is
+  unsupported, and no key in any error
 - **UI widgets** — command history recall, Cloud Settings credential handling,
   worker-thread handover on close
 - **Input hardening** — malformed AI arguments (`true`, `"30"`, fractional
@@ -268,11 +277,10 @@ real model separately: `scripts/needle_spike.py` (demo prompt routing),
   a failed step skips the remainder and reports honestly.
 - An abandoned cloud request (after Reset or Emergency Stop) cannot be cancelled
   mid-flight, so a following request queues behind it for up to the 20 s timeout.
-- The OpenAI structured-output path has not been exercised against the live API.
-  If it rejects the strict plan schema, the JSON-mode fallback handles the
-  request and the monitor says so — costing one extra round trip per command.
-- OpenAI is the only cloud provider; the model ID is user-supplied, nothing is
-  hardcoded.
+- No provider's structured-output path has been exercised against a live API.
+  If one rejects the strict plan schema, that provider's JSON fallback handles
+  the request and the monitor says so — costing one extra round trip.
+- Model IDs are always user-supplied — nothing is hardcoded for any provider.
 
 ## License
 
@@ -289,3 +297,4 @@ real model separately: `scripts/needle_spike.py` (demo prompt routing),
 | [`v0.1.4`](https://github.com/sinbumu/needle-factory-sim/releases/tag/v0.1.4) | Safety-review fixes, MIT license, CI, cloud connection test, 79 tests |
 | [`v0.1.5`](https://github.com/sinbumu/needle-factory-sim/releases/tag/v0.1.5) | Strict AI-argument validation, terminal-state fixes, crash-safe workers, 104 tests |
 | [`v0.1.6`](https://github.com/sinbumu/needle-factory-sim/releases/tag/v0.1.6) | A plan that reaches the goal finishes as SUCCEEDED; 105 tests |
+| [`v0.2.0`](https://github.com/sinbumu/needle-factory-sim/releases/tag/v0.2.0) | Cloud planner supports OpenAI, Anthropic (Claude) and Google (Gemini); 124 tests |
